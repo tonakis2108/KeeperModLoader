@@ -364,28 +364,38 @@ func disableLoader(game *GameInfo) (string, error) {
 	if err := assertGameStopped(game); err != nil {
 		return "", err
 	}
-	if !loaderBootstrapActive(game) {
-		return "KeeperLoader was already inactive; no bootstrap files were changed.", nil
-	}
 	loader := filepath.Join(game.GameDirectory, "KeeperLoader")
+	active := loaderBootstrapActive(game)
+	disabledProxy := filepath.Join(game.GameDirectory, "winhttp.keeperloader-disabled.dll")
+	if !active && !dirExists(loader) && !fileExists(disabledProxy) {
+		return "KeeperLoader was already absent; no files were changed.", nil
+	}
 	marker := filepath.Join(loader, "state", "last-backup.txt")
 	backup := ""
 	if data, err := os.ReadFile(marker); err == nil {
 		backup = strings.TrimSpace(string(data))
 	}
-	for _, name := range []string{"winhttp.dll", "doorstop_config.ini"} {
-		current := filepath.Join(game.GameDirectory, name)
-		if err := os.Remove(current); err != nil && !os.IsNotExist(err) {
-			return "", err
-		}
-		if backup != "" {
-			original := filepath.Join(backup, name)
-			if fileExists(original) {
-				if err := copyFile(original, current); err != nil {
-					return "", err
+	if active {
+		for _, name := range []string{"winhttp.dll", "doorstop_config.ini"} {
+			current := filepath.Join(game.GameDirectory, name)
+			if err := os.Remove(current); err != nil && !os.IsNotExist(err) {
+				return "", err
+			}
+			if backup != "" {
+				original := filepath.Join(backup, name)
+				if fileExists(original) {
+					if err := copyFile(original, current); err != nil {
+						return "", err
+					}
 				}
 			}
 		}
 	}
-	return "KeeperLoader disabled. Mods, settings, logs, backups, and saves were retained.", nil
+	if err := os.Remove(disabledProxy); err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	if err := os.RemoveAll(loader); err != nil {
+		return "", err
+	}
+	return "KeeperLoader removed completely. Original bootstrap files were restored when available; game saves were not touched.", nil
 }

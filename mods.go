@@ -433,24 +433,40 @@ func uninstallMod(game *GameInfo, mod *InstalledMod) (string, error) {
 		return "", errors.New("the selected mod is not installed")
 	}
 	loader := filepath.Join(game.GameDirectory, "KeeperLoader")
-	backupRoot := filepath.Join(loader, "backup", "uninstalled")
-	if err := os.MkdirAll(backupRoot, 0755); err != nil {
-		return "", err
+	expectedModPath := filepath.Join(loader, "mods", mod.ID)
+	if !strings.EqualFold(filepath.Clean(mod.Path), filepath.Clean(expectedModPath)) {
+		return "", errors.New("the selected mod path is outside the KeeperLoader mods directory")
 	}
-	backup := uniqueTimestampPath(backupRoot, mod.ID)
-	if err := os.Rename(mod.Path, backup); err != nil {
-		return "", err
+	for _, path := range []string{
+		mod.Path,
+		filepath.Join(loader, "config", mod.ID+".cfg"),
+		filepath.Join(loader, "state", mod.ID),
+	} {
+		if err := os.RemoveAll(path); err != nil {
+			return "", err
+		}
 	}
-	record := map[string]any{
-		"id": mod.ID, "name": mod.Name, "version": mod.Version,
-		"uninstalledAtUtc": time.Now().UTC().Format(time.RFC3339Nano), "originalPath": mod.Path,
-		"configPreserved": filepath.Join(loader, "config", mod.ID+".cfg"),
-		"statePreserved":  filepath.Join(loader, "state", mod.ID), "saveFilesTouched": false, "gameId": game.GameID,
+	for _, backupRoot := range []string{
+		filepath.Join(loader, "backup", "mods"),
+		filepath.Join(loader, "backup", "uninstalled"),
+	} {
+		entries, readErr := os.ReadDir(backupRoot)
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
+				continue
+			}
+			return "", readErr
+		}
+		prefix := strings.ToLower(mod.ID) + "-"
+		for _, entry := range entries {
+			if strings.HasPrefix(strings.ToLower(entry.Name()), prefix) {
+				if err := os.RemoveAll(filepath.Join(backupRoot, entry.Name())); err != nil {
+					return "", err
+				}
+			}
+		}
 	}
-	if data, err := json.MarshalIndent(record, "", "  "); err == nil {
-		_ = os.WriteFile(filepath.Join(backup, "keeperloader-uninstall.json"), append(data, '\n'), 0644)
-	}
-	return backup, nil
+	return "Mod files, configuration, state, and backups were deleted. Game saves were not touched.", nil
 }
 
 func restorePreviousMod(game *GameInfo, current *InstalledMod) (*InstalledMod, string, error) {

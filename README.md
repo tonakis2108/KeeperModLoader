@@ -1,4 +1,4 @@
-# KeeperLoader 0.5.0 Alpha
+# KeeperLoader 0.5.1 Alpha
 
 KeeperLoader is a compact, general-purpose mod loader for **Windows Unity Mono games**. It uses UnityDoorstop to enter the game's existing Mono runtime, waits for managed game code to load, attaches one persistent Unity host, and then loads compatible KeeperLoader mods.
 
@@ -22,7 +22,7 @@ Explicitly unsupported in this release:
 - Plugins built for other mod-loader APIs; KeeperLoader uses its own API and lifecycle.
 - Anti-cheat-protected or competitive online games. Do not inject a mod loader where a game's rules prohibit modification.
 
-Unity documents the Windows player as an executable paired with a `ProjectName_Data` directory. Unity also distinguishes Mono's managed JIT runtime from IL2CPP's ahead-of-time native pipeline. UnityDoorstop supports entry into both, but its IL2CPP path requires a separate CoreCLR environment; KeeperLoader 0.5.0 deliberately accepts only the shared Mono path.
+Unity documents the Windows player as an executable paired with a `ProjectName_Data` directory. Unity also distinguishes Mono's managed JIT runtime from IL2CPP's ahead-of-time native pipeline. UnityDoorstop supports entry into both, but its IL2CPP path requires a separate CoreCLR environment; KeeperLoader 0.5.1 deliberately accepts only the shared Mono path.
 
 KeeperLoader retains the deferred initialization introduced in 0.2.1: it creates its Unity host only after the first `SceneManager.sceneLoaded` callback. This avoids invoking `GameObject` APIs during Doorstop's early assembly-loading phase, which could stall startup on a black screen.
 
@@ -33,11 +33,11 @@ KeeperLoader retains the deferred initialization introduced in 0.2.1: it creates
 3. Run `KeeperLoader-Manager.exe` and approve the Windows administrator prompt.
 4. Let it scan Steam libraries or use **Add game...** for another location.
 5. Select compatible games (Ctrl-click for several), then choose **Enable / update selected**.
-6. Use **Disable selected** to restore their previous bootstrap files later.
+6. Use **Remove selected** to restore their previous bootstrap files and permanently delete the per-game KeeperLoader installation later.
 
 The alpha executable is not digitally signed, so Windows SmartScreen may display an **Unknown publisher** warning. Confirm that the file came from the original KeeperLoader package and compare it with `SHA256SUMS.txt` before allowing it. Internet access is required the first time the manager downloads the pinned UnityDoorstop bootstrap.
 
-The same compiled manager controls all detected games in one batch. **Manage mods...** opens ZIP installation, mod listing, package creation, and recoverable removal controls for one highlighted game. **Open saves** opens the detected persistent-data location.
+The same compiled manager controls all detected games in one batch. **Manage mods...** opens ZIP installation, mod listing, package creation, and permanent uninstall controls for one highlighted game. **Open saves** opens the detected persistent-data location.
 
 Each game process still requires a small local Doorstop bridge and core compiled against that game's Unity assemblies. The Universal Manager creates and maintains those files automatically; users do not run separate installers or keep separate setup packages.
 
@@ -53,7 +53,7 @@ The manager:
 - Compiles KeeperLoader against that game's own Unity assemblies.
 - Backs up existing bootstrap files before activating its own.
 - Records a normalized game ID derived from the executable name.
-- Runs as a native Windows GUI executable without invoking CMD or PowerShell.
+- Runs as a native Windows GUI executable.
 - Pins the official UnityDoorstop 4.5.0 Windows release to its published SHA-256 digest before use.
 
 ## Updating KeeperLoader without losing data
@@ -65,7 +65,7 @@ To update the manager from 0.5.0 onward:
 1. Download the newer **KeeperLoader-Windows-x64** artifact ZIP from the repository's successful GitHub Actions build.
 2. Open the existing manager and select **Install manager update...**.
 3. Select the artifact ZIP without extracting it.
-4. The manager requires `VERSION`, `SHA256SUMS.txt`, and `KeeperLoader-Manager.exe`, verifies that the version is newer, checks the executable's SHA-256 digest, then closes, replaces itself, and restarts without CMD or PowerShell.
+4. The manager requires `VERSION`, `SHA256SUMS.txt`, and `KeeperLoader-Manager.exe`, verifies that the version is newer, checks the executable's SHA-256 digest, then closes, replaces itself, and restarts.
 
 The first upgrade from 0.4.1 to 0.5.0 is manual because 0.4.1 predates the integrated updater: replace the old manager executable with the one from the 0.5.0 artifact. No game data is stored beside that executable.
 
@@ -115,7 +115,7 @@ KeeperLoader can provide the same loader-level facilities across supported games
 - Per-mod logging, configuration, and state directories
 - Exception isolation and automatic disabling after repeated callback failures
 - Crash-recovery safe mode
-- Validated ZIP installation, listing, updates, backup, and recoverable uninstall
+- Validated ZIP installation, listing, updates, rollback, and complete uninstall
 
 Game behavior is not standardized. Player types, inventories, maps, quests, save formats, and camera logic differ between games. A loader may be portable while a minimap or gameplay mod is not. Package compatibility declarations prevent that distinction from becoming an expensive surprise.
 
@@ -131,9 +131,9 @@ These checks detect corruption and manifest/payload mismatches. They do not auth
 
 ## Listing and uninstalling mods
 
-The selected game's management window lists active mods by name, version, and ID. **Uninstall selected** moves the active mod folder to `KeeperLoader\backup\uninstalled`.
+The selected game's management window lists active mods by name, version, and ID. **Uninstall selected** permanently deletes the active mod folder, its `KeeperLoader\config\<mod-id>.cfg` file, its `KeeperLoader\state\<mod-id>` directory, and matching mod backups.
 
-KeeperLoader leaves mod configuration, mod state, and game save files untouched. This makes the file operation recoverable, but it cannot make a save independent of content previously written by a mod.
+Game save files remain untouched. Uninstall cannot be undone, and it cannot make a save independent of content previously written by a mod.
 
 ## Persistent data and saves
 
@@ -176,9 +176,9 @@ Game Folder/
 
 KeeperLoader writes a boot marker at startup and removes it on clean shutdown. Following an unclean exit, the next run skips mods. Close that safe-mode run normally and restart to load mods again.
 
-If the game cannot reach its first scene, rename the game-folder `winhttp.dll` to `winhttp.keeperloader-disabled.dll` to disable injection immediately. This does not touch mods, configurations, state, or saves. The manager can then restore the pre-KeeperLoader bootstrap files.
+If the game cannot reach its first scene, rename the game-folder `winhttp.dll` to `winhttp.keeperloader-disabled.dll` to pause injection immediately. This does not touch mods, configurations, state, or saves. The manager can then perform a complete removal.
 
-Select the game in `KeeperLoader-Manager.exe` and choose **Disable selected** to restore the most recently backed-up bootstrap files. The `KeeperLoader` directory remains so mods, logs, configurations, and backups are not destroyed automatically.
+Select the game in `KeeperLoader-Manager.exe` and choose **Remove selected** to restore the most recently backed-up pre-loader bootstrap files when available, remove the disabled proxy if present, and delete the entire game-local `KeeperLoader` directory. This permanently deletes the loader core, installed mods, configurations, state, logs, and backups. It does not delete the game executable, the game's `_Data` directory, or Unity save-data directories.
 
 ## Current limitations
 

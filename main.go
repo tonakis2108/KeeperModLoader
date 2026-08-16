@@ -64,7 +64,7 @@ func main() {
 		Layout:   VBox{MarginsZero: false, Spacing: 8},
 		Children: []Widget{
 			Label{Text: "KeeperLoader Universal Manager", Font: Font{Family: "Segoe UI", PointSize: 16, Bold: true}},
-			Label{Text: "Native Windows manager for compatible Unity Mono games — no CMD or PowerShell"},
+			Label{Text: "Native Windows manager for compatible Unity Mono games"},
 			ListBox{AssignTo: &app.list, Model: app.model, MultiSelection: true, MinSize: Size{Height: 290}},
 			Composite{Layout: HBox{MarginsZero: true, Spacing: 7}, Children: []Widget{
 				PushButton{AssignTo: &scanButton, Text: "Scan Steam", OnClicked: func() { app.scanSteam() }},
@@ -75,7 +75,7 @@ func main() {
 			Composite{Layout: HBox{MarginsZero: true, Spacing: 7}, Children: []Widget{
 				HSpacer{},
 				PushButton{AssignTo: &enableButton, Text: "Enable / update selected", OnClicked: func() { app.enableSelected() }},
-				PushButton{AssignTo: &disableButton, Text: "Disable selected", OnClicked: func() { app.disableSelected() }},
+				PushButton{AssignTo: &disableButton, Text: "Remove selected", OnClicked: func() { app.disableSelected() }},
 				PushButton{AssignTo: &manageButton, Text: "Manage mods…", OnClicked: func() { app.manageSelected() }},
 				PushButton{AssignTo: &savesButton, Text: "Open saves", OnClicked: func() { app.openSaves() }},
 			}},
@@ -216,22 +216,22 @@ func (app *application) disableSelected() {
 	if len(games) == 0 {
 		return
 	}
-	if walk.MsgBox(app.mw, "Confirm disable", fmt.Sprintf("Disable KeeperLoader for %d selected game(s)?\r\n\r\nMods, settings, logs, backups, and saves will be retained.", len(games)), walk.MsgBoxYesNo|walk.MsgBoxIconWarning) != walk.DlgCmdYes {
+	if walk.MsgBox(app.mw, "Confirm complete removal", fmt.Sprintf("Permanently remove KeeperLoader from %d selected game(s)?\r\n\r\nThis deletes only KeeperLoader's game-folder files: the loader core, installed mods, configuration, state, logs, backups, and KeeperLoader bootstrap files. Original pre-loader bootstrap files are restored when available. The game installation and game saves are not touched.\r\n\r\nThis cannot be undone.", len(games)), walk.MsgBoxYesNo|walk.MsgBoxIconWarning) != walk.DlgCmdYes {
 		return
 	}
-	app.setBusy(true, "Disabling KeeperLoader…")
+	app.setBusy(true, "Removing KeeperLoader…")
 	go func() {
 		for _, game := range games {
 			message, err := disableLoader(game)
 			app.mw.Synchronize(func() {
 				if err != nil {
-					app.appendLog("Could not disable " + game.ProcessName + ": " + err.Error())
+					app.appendLog("Could not remove KeeperLoader from " + game.ProcessName + ": " + err.Error())
 				} else {
 					app.appendLog(game.ProcessName + ": " + message)
 				}
 			})
 		}
-		app.mw.Synchronize(func() { app.model.PublishItemsReset(); app.setBusy(false, "Disable operation completed.") })
+		app.mw.Synchronize(func() { app.model.PublishItemsReset(); app.setBusy(false, "Removal operation completed.") })
 	}()
 }
 
@@ -303,7 +303,7 @@ func showModManager(owner walk.Form, game *GameInfo) {
 		Children: []Widget{
 			Label{Text: fmt.Sprintf("%s  |  game id: %s  |  Unity %s %s", game.ExecutableName, game.GameID, game.Backend, game.Architecture)},
 			ListBox{AssignTo: &list, Model: model, MinSize: Size{Height: 260}},
-			Label{Text: "ZIP packages are checked before activation. Uninstall moves active files to a recoverable backup."},
+			Label{Text: "ZIP packages are checked before activation. Uninstall permanently removes that mod's files and data."},
 			Composite{Layout: HBox{MarginsZero: true, Spacing: 7}, Children: []Widget{
 				PushButton{AssignTo: &installButton, Text: "Install Mod ZIP…", OnClicked: func() {
 					fileDialog := &walk.FileDialog{Title: "Select a KeeperLoader mod package", Filter: "KeeperLoader mod package (*.zip)|*.zip"}
@@ -382,16 +382,16 @@ func showModManager(owner walk.Form, game *GameInfo) {
 						return
 					}
 					mod := model.items[index]
-					if walk.MsgBox(dlg, "Confirm uninstall", "Uninstall "+mod.Name+"?\r\n\r\nThe active folder will move to a recoverable backup. Config, state, and saves remain untouched.", walk.MsgBoxYesNo|walk.MsgBoxIconWarning) != walk.DlgCmdYes {
+					if walk.MsgBox(dlg, "Confirm permanent uninstall", "Permanently uninstall "+mod.Name+"?\r\n\r\nThe active mod, its configuration, state, and backups will be deleted. Game saves are not touched.\r\n\r\nThis cannot be undone.", walk.MsgBoxYesNo|walk.MsgBoxIconWarning) != walk.DlgCmdYes {
 						return
 					}
-					backup, err := uninstallMod(game, mod)
+					message, err := uninstallMod(game, mod)
 					if err != nil {
 						walk.MsgBox(dlg, "Uninstall failed", err.Error(), walk.MsgBoxIconError)
 						return
 					}
 					refresh()
-					status.SetText("Uninstalled safely. Backup: " + backup)
+					status.SetText(message)
 				}},
 			}},
 			Composite{Layout: HBox{MarginsZero: true, Spacing: 7}, Children: []Widget{

@@ -18,7 +18,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const loaderVersion = "0.5.0"
+const loaderVersion = "0.5.1"
 
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
@@ -137,10 +137,10 @@ func runCompiler(compiler, output string, sources, references []string) error {
 		args = append(args, "/reference:"+reference)
 	}
 	args = append(args, sources...)
-	cmd := exec.Command(compiler, args...)
-	cmd.Dir = filepath.Dir(output)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	combined, err := cmd.CombinedOutput()
+	compilerCommand := exec.Command(compiler, args...)
+	compilerCommand.Dir = filepath.Dir(output)
+	compilerCommand.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	combined, err := compilerCommand.CombinedOutput()
 	if err != nil {
 		message := strings.TrimSpace(string(combined))
 		if message == "" {

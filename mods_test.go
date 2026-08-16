@@ -123,4 +123,33 @@ func TestModUpdatePreservesDataRejectsWrongPackageAndRestores(t *testing.T) {
 	if data, readErr := os.ReadFile(statePath); readErr != nil || string(data) != "persistent-state" {
 		t.Fatalf("state was not preserved through rollback: %q, %v", string(data), readErr)
 	}
+	savePath := filepath.Join(root, "game-save.dat")
+	if err = os.WriteFile(savePath, []byte("save data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = uninstallMod(game, restored); err != nil {
+		t.Fatal(err)
+	}
+	for _, removedPath := range []string{restored.Path, configPath, filepath.Dir(statePath)} {
+		if fileExists(removedPath) || dirExists(removedPath) {
+			t.Fatalf("uninstall left managed data behind: %s", removedPath)
+		}
+	}
+	for _, backupRoot := range []string{
+		filepath.Join(loader, "backup", "mods"),
+		filepath.Join(loader, "backup", "uninstalled"),
+	} {
+		entries, readErr := os.ReadDir(backupRoot)
+		if readErr != nil && !os.IsNotExist(readErr) {
+			t.Fatal(readErr)
+		}
+		for _, entry := range entries {
+			if len(entry.Name()) >= len(restored.ID)+1 && entry.Name()[:len(restored.ID)+1] == restored.ID+"-" {
+				t.Fatalf("uninstall left a matching mod backup behind: %s", entry.Name())
+			}
+		}
+	}
+	if data, readErr := os.ReadFile(savePath); readErr != nil || string(data) != "save data" {
+		t.Fatalf("game save was changed by uninstall: %q, %v", string(data), readErr)
+	}
 }
