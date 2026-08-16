@@ -28,6 +28,7 @@ type ModManifest struct {
 	ID                         string         `json:"id"`
 	Name                       string         `json:"name"`
 	Version                    string         `json:"version"`
+	EntryMode                  string         `json:"entryMode,omitempty"`
 	MinimumKeeperLoaderVersion string         `json:"minimumKeeperLoaderVersion"`
 	UnityBackend               string         `json:"unityBackend"`
 	SupportedGames             []string       `json:"supportedGames"`
@@ -41,6 +42,8 @@ type InstalledMod struct {
 	Version string
 	Path    string
 	Enabled bool
+	Mode    string
+	Status  string
 }
 
 func (m *InstalledMod) String() string {
@@ -48,7 +51,15 @@ func (m *InstalledMod) String() string {
 	if m.Enabled {
 		status = "Enabled"
 	}
-	return fmt.Sprintf("[%s]  %s  |  %s  |  %s", status, m.Name, m.Version, m.ID)
+	kind := ""
+	if m.Mode == externalPluginMode {
+		externalStatus := strings.TrimSpace(m.Status)
+		if externalStatus == "" {
+			externalStatus = "pending"
+		}
+		kind = "  [External: " + strings.Title(externalStatus) + "]"
+	}
+	return fmt.Sprintf("[%s]%s  %s  |  %s  |  %s", status, kind, m.Name, m.Version, m.ID)
 }
 
 const modDisabledMarker = "keeperloader.disabled"
@@ -95,7 +106,11 @@ func installedMods(game *GameInfo) ([]*InstalledMod, error) {
 				if strings.TrimSpace(manifest.Version) != "" {
 					mod.Version = manifest.Version
 				}
+				mod.Mode = manifest.EntryMode
 			}
+		}
+		if mod.Mode == externalPluginMode {
+			mod.Status = readExternalPluginStatus(game, mod.ID)
 		}
 		result = append(result, mod)
 	}
@@ -412,7 +427,7 @@ func installModPackageWithOptions(game *GameInfo, zipPath string, options modIns
 			return nil, "", err
 		}
 	}
-	activation := fmt.Sprintf("game_id=%s\r\nbackend=Mono\r\ncompatibility=explicit-game-id\r\nmod_id=%s\r\npackage_version=%s\r\nkeeperloader_version=%s\r\n", game.GameID, manifest.ID, manifest.Version, loaderVersion)
+	activation := fmt.Sprintf("game_id=%s\r\nbackend=Mono\r\ncompatibility=explicit-game-id\r\nentry_mode=native\r\nmod_id=%s\r\npackage_version=%s\r\nkeeperloader_version=%s\r\n", game.GameID, manifest.ID, manifest.Version, loaderVersion)
 	if err = os.WriteFile(filepath.Join(staging, "keeperloader.activation"), []byte(activation), 0644); err != nil {
 		return nil, "", err
 	}
@@ -445,7 +460,7 @@ func installModPackageWithOptions(game *GameInfo, zipPath string, options modIns
 		return nil, "", err
 	}
 	stagingActive = false
-	return &InstalledMod{ID: manifest.ID, Name: manifest.Name, Version: manifest.Version, Path: target, Enabled: !keepDisabled}, backup, nil
+	return &InstalledMod{ID: manifest.ID, Name: manifest.Name, Version: manifest.Version, Path: target, Enabled: !keepDisabled, Mode: manifest.EntryMode}, backup, nil
 }
 
 func validateInstalledModPath(game *GameInfo, mod *InstalledMod) error {
@@ -587,7 +602,12 @@ func restorePreviousMod(game *GameInfo, current *InstalledMod) (*InstalledMod, s
 		_ = os.Rename(currentBackup, current.Path)
 		return nil, "", err
 	}
-	return &InstalledMod{ID: previous.manifest.ID, Name: previous.manifest.Name, Version: previous.manifest.Version, Path: current.Path, Enabled: !keepDisabled}, currentBackup, nil
+	status := ""
+	if previous.manifest.EntryMode == externalPluginMode {
+		_ = writeExternalPluginStatus(game, previous.manifest.ID, "pending", "Restored package has not been tested in the game yet.")
+		status = "pending"
+	}
+	return &InstalledMod{ID: previous.manifest.ID, Name: previous.manifest.Name, Version: previous.manifest.Version, Path: current.Path, Enabled: !keepDisabled, Mode: previous.manifest.EntryMode, Status: status}, currentBackup, nil
 }
 
 func createModPackage(sourceFolder, modID, modName, version string, supportedGames []string, minimumVersion, outputZip string) error {

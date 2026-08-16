@@ -294,11 +294,11 @@ func showModManager(owner walk.Form, game *GameInfo) {
 	var dlg *walk.Dialog
 	var list *walk.ListBox
 	var status *walk.Label
-	var installButton, toggleButton, updateButton, restoreButton, uninstallButton, safeModeButton, packageButton, openButton, closeButton *walk.PushButton
+	var installButton, externalButton, toggleButton, updateButton, restoreButton, uninstallButton, safeModeButton, packageButton, openButton, closeButton *walk.PushButton
 	refresh := func() { items, _ := installedMods(game); model.reset(items) }
 	decl := Dialog{
 		AssignTo: &dlg, Title: "KeeperLoader Mods — " + game.ProcessName, FixedSize: false,
-		Size: Size{Width: 760, Height: 500}, MinSize: Size{Width: 650, Height: 420},
+		Size: Size{Width: 900, Height: 540}, MinSize: Size{Width: 720, Height: 440},
 		Layout: VBox{Spacing: 8},
 		Children: []Widget{
 			Label{Text: fmt.Sprintf("%s  |  game id: %s  |  Unity %s %s", game.ExecutableName, game.GameID, game.Backend, game.Architecture)},
@@ -330,6 +330,34 @@ func showModManager(owner walk.Form, game *GameInfo) {
 					}
 					status.SetText(message)
 				}},
+				PushButton{AssignTo: &externalButton, Text: "Install External Plugin ZIP…", OnClicked: func() {
+					if walk.MsgBox(dlg, "Experimental external plugin", "KeeperLoader will inspect this ZIP and attempt to attach compatible Unity plugin components. Required third-party runtime dependencies are not supplied, and many packages may remain incompatible.\r\n\r\nOnly continue with code from a source you trust.", walk.MsgBoxYesNo|walk.MsgBoxIconWarning) != walk.DlgCmdYes {
+						return
+					}
+					fileDialog := &walk.FileDialog{Title: "Select an external Unity plugin package", Filter: "External plugin package (*.zip)|*.zip"}
+					accepted, err := fileDialog.ShowOpen(dlg)
+					if err != nil || !accepted {
+						if err != nil {
+							status.SetText(err.Error())
+						}
+						return
+					}
+					status.SetText("Inspecting and installing external plugin…")
+					dlg.SetEnabled(false)
+					mod, backup, installErr := installExternalPluginPackage(game, fileDialog.FilePath)
+					dlg.SetEnabled(true)
+					if installErr != nil {
+						status.SetText(installErr.Error())
+						walk.MsgBox(dlg, "External plugin rejected", installErr.Error(), walk.MsgBoxIconError)
+						return
+					}
+					refresh()
+					message := fmt.Sprintf("%s %s installed for an experimental load attempt on the next game start.", mod.Name, mod.Version)
+					if backup != "" {
+						message += " Previous package backed up."
+					}
+					status.SetText(message)
+				}},
 				PushButton{AssignTo: &toggleButton, Text: "Enable / disable selected", OnClicked: func() {
 					index := list.CurrentIndex()
 					if index < 0 || index >= len(model.items) {
@@ -345,6 +373,8 @@ func showModManager(owner walk.Form, game *GameInfo) {
 					refresh()
 					status.SetText(message)
 				}},
+			}},
+			Composite{Layout: HBox{MarginsZero: true, Spacing: 7}, Children: []Widget{
 				PushButton{AssignTo: &updateButton, Text: "Update selected from ZIP…", OnClicked: func() {
 					index := list.CurrentIndex()
 					if index < 0 || index >= len(model.items) {
@@ -352,7 +382,13 @@ func showModManager(owner walk.Form, game *GameInfo) {
 						return
 					}
 					current := model.items[index]
-					fileDialog := &walk.FileDialog{Title: "Select the newer package for " + current.Name, Filter: "KeeperLoader mod package (*.zip)|*.zip"}
+					title := "Select the newer package for " + current.Name
+					filter := "KeeperLoader mod package (*.zip)|*.zip"
+					if current.Mode == externalPluginMode {
+						title = "Select a replacement external package for " + current.Name
+						filter = "External plugin package (*.zip)|*.zip"
+					}
+					fileDialog := &walk.FileDialog{Title: title, Filter: filter}
 					accepted, err := fileDialog.ShowOpen(dlg)
 					if err != nil || !accepted {
 						if err != nil {
@@ -362,7 +398,14 @@ func showModManager(owner walk.Form, game *GameInfo) {
 					}
 					status.SetText("Validating mod update…")
 					dlg.SetEnabled(false)
-					updated, backup, updateErr := updateModPackage(game, current, fileDialog.FilePath)
+					var updated *InstalledMod
+					var backup string
+					var updateErr error
+					if current.Mode == externalPluginMode {
+						updated, backup, updateErr = updateExternalPluginPackage(game, current, fileDialog.FilePath)
+					} else {
+						updated, backup, updateErr = updateModPackage(game, current, fileDialog.FilePath)
+					}
 					dlg.SetEnabled(true)
 					if updateErr != nil {
 						status.SetText(updateErr.Error())
@@ -429,6 +472,7 @@ func showModManager(owner walk.Form, game *GameInfo) {
 	}
 	_, err := decl.Run(owner)
 	_ = installButton
+	_ = externalButton
 	_ = toggleButton
 	_ = updateButton
 	_ = restoreButton

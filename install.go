@@ -114,6 +114,7 @@ func extractEmbeddedSources(destination string) (map[string]string, error) {
 		"src/Runtime/RuntimeHost.cs",
 		"src/Runtime/FileLogger.cs",
 		"src/Runtime/ModCatalog.cs",
+		"src/Runtime/ExternalPluginCatalog.cs",
 	}
 	result := make(map[string]string, len(paths))
 	for _, path := range paths {
@@ -276,7 +277,7 @@ func enableLoader(game *GameInfo) (string, error) {
 	if err = runCompiler(compiler, bootstrapBuild, []string{sources["Entrypoint.cs"]}, nil); err != nil {
 		return "", err
 	}
-	runtimeSourceList := []string{sources["RuntimeHost.cs"], sources["FileLogger.cs"], sources["ModCatalog.cs"]}
+	runtimeSourceList := []string{sources["RuntimeHost.cs"], sources["FileLogger.cs"], sources["ModCatalog.cs"], sources["ExternalPluginCatalog.cs"]}
 	if err = runCompiler(compiler, runtimeBuild, runtimeSourceList, append([]string{apiBuild}, references...)); err != nil {
 		return "", err
 	}

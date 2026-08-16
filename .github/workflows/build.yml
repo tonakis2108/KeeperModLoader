@@ -38,6 +38,26 @@ jobs:
             throw "VERSION does not match loaderVersion"
           }
 
+      - name: Verify embedded C# runtime
+        shell: pwsh
+        run: |
+          $framework = Get-ChildItem "$env:WINDIR\Microsoft.NET\Framework64" -Directory |
+            Sort-Object Name -Descending |
+            Where-Object { Test-Path (Join-Path $_.FullName "csc.exe") } |
+            Select-Object -First 1
+          if (-not $framework) {
+            throw "A .NET Framework C# compiler was not found"
+          }
+          $csc = Join-Path $framework.FullName "csc.exe"
+          New-Item -ItemType Directory -Force build-csharp | Out-Null
+          & $csc /nologo /target:library /out:build-csharp\KeeperLoader.API.dll src\API\KeeperLoaderApi.cs
+          if ($LASTEXITCODE -ne 0) { throw "KeeperLoader API compilation failed" }
+          & $csc /nologo /target:library /out:build-csharp\KeeperLoader.Bootstrap.dll src\Bootstrap\Entrypoint.cs
+          if ($LASTEXITCODE -ne 0) { throw "KeeperLoader bootstrap compilation failed" }
+          $runtimeSources = Get-ChildItem src\Runtime\*.cs | ForEach-Object FullName
+          & $csc /nologo /target:library /out:build-csharp\KeeperLoader.Runtime.dll /reference:build-csharp\KeeperLoader.API.dll $runtimeSources src\Runtime.Tests\UnityEngineStubs.cs
+          if ($LASTEXITCODE -ne 0) { throw "KeeperLoader runtime compilation failed" }
+
       - name: Build Windows GUI
         env:
           CGO_ENABLED: "0"

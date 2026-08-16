@@ -2,14 +2,14 @@
   "FixedFileInfo": {
     "FileVersion": {
       "Major": 0,
-      "Minor": 5,
-      "Patch": 3,
+      "Minor": 6,
+      "Patch": 0,
       "Build": 0
     },
     "ProductVersion": {
       "Major": 0,
-      "Minor": 5,
-      "Patch": 3,
+      "Minor": 6,
+      "Patch": 0,
       "Build": 0
     },
     "FileFlagsMask": "3f",
@@ -22,14 +22,14 @@
     "Comments": "Open-source manager for KeeperLoader-compatible Unity Mono game mods.",
     "CompanyName": "tonakis2108",
     "FileDescription": "KeeperLoader Universal Manager",
-    "FileVersion": "0.5.3.0",
+    "FileVersion": "0.6.0.0",
     "InternalName": "KeeperLoader-Manager",
     "LegalCopyright": "Copyright 2026 tonakis2108. Licensed under LGPL-2.1-or-later.",
     "LegalTrademarks": "",
     "OriginalFilename": "KeeperLoader-Manager.exe",
     "PrivateBuild": "",
     "ProductName": "KeeperLoader",
-    "ProductVersion": "0.5.3",
+    "ProductVersion": "0.6.0",
     "SpecialBuild": ""
   },
   "VarFileInfo": {

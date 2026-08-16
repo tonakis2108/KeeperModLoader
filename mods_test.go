@@ -53,6 +53,97 @@ func writeTestModPackage(t *testing.T, path, id, version, gameID string) {
 	}
 }
 
+func writeTestExternalPackage(t *testing.T, path, name, version string, blocked bool) {
+	t.Helper()
+	output, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive := zip.NewWriter(output)
+	metadata, _ := json.Marshal(map[string]string{"name": name, "version_number": version})
+	metadataWriter, err := archive.Create("manifest.json")
+	if err == nil {
+		_, err = metadataWriter.Write(metadata)
+	}
+	if err == nil {
+		pluginWriter, createErr := archive.Create("plugins/External.Plugin.dll")
+		err = createErr
+		if err == nil {
+			_, err = pluginWriter.Write([]byte("managed-external-plugin-placeholder"))
+		}
+	}
+	if err == nil && blocked {
+		blockedWriter, createErr := archive.Create("install.cmd")
+		err = createErr
+		if err == nil {
+			_, err = blockedWriter.Write([]byte("blocked"))
+		}
+	}
+	if closeErr := archive.Close(); err == nil {
+		err = closeErr
+	}
+	if closeErr := output.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExternalPluginPackageIsManagedAndStatusSurvivesDisable(t *testing.T) {
+	root := t.TempDir()
+	game := &GameInfo{
+		GameDirectory: root, ExecutableName: "KeeperLoader-Test-Process.exe",
+		GameID: "test-game", Backend: "Mono", Architecture: "x64", Supported: true,
+	}
+	loader := filepath.Join(root, "KeeperLoader")
+	if err := os.MkdirAll(filepath.Join(loader, "state"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	record, _ := json.Marshal(map[string]string{"gameId": game.GameID, "keeperLoaderVersion": loaderVersion})
+	if err := os.WriteFile(filepath.Join(loader, "state", "game.json"), record, 0644); err != nil {
+		t.Fatal(err)
+	}
+	packageOne := filepath.Join(t.TempDir(), "ExamplePlugin-1.0.0.zip")
+	writeTestExternalPackage(t, packageOne, "Example Plugin", "1.0.0", false)
+	installed, _, err := installExternalPluginPackage(game, packageOne)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if installed.ID != "external.example-plugin" || installed.Mode != externalPluginMode || installed.Status != "pending" {
+		t.Fatalf("unexpected external package identity: %#v", installed)
+	}
+	manifestData, err := os.ReadFile(filepath.Join(installed.Path, "keepermod.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest ModManifest
+	if json.Unmarshal(manifestData, &manifest) != nil || manifest.EntryMode != externalPluginMode || len(manifest.Files) != 2 {
+		t.Fatalf("unexpected generated external manifest: %#v", manifest)
+	}
+	if _, err = setModEnabled(game, installed, false); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := installedMods(game)
+	if err != nil || len(listed) != 1 || listed[0].Enabled || listed[0].Mode != externalPluginMode || listed[0].Status != "pending" {
+		t.Fatalf("external package was not listed correctly: %#v, %v", listed, err)
+	}
+	packageTwo := filepath.Join(t.TempDir(), "ExamplePlugin-1.1.0.zip")
+	writeTestExternalPackage(t, packageTwo, "Example Plugin", "1.1.0", false)
+	updated, backup, err := updateExternalPluginPackage(game, listed[0], packageTwo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Enabled || updated.Version != "1.1.0" || backup == "" || !dirExists(backup) {
+		t.Fatalf("external package update did not preserve status: %#v, backup=%s", updated, backup)
+	}
+	blocked := filepath.Join(t.TempDir(), "BlockedPlugin-1.0.0.zip")
+	writeTestExternalPackage(t, blocked, "Blocked Plugin", "1.0.0", true)
+	if _, _, err = installExternalPluginPackage(game, blocked); err == nil {
+		t.Fatal("external package containing a blocked script was accepted")
+	}
+}
+
 func TestModUpdatePreservesDataRejectsWrongPackageAndRestores(t *testing.T) {
 	root := t.TempDir()
 	game := &GameInfo{

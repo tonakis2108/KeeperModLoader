@@ -11,11 +11,13 @@ namespace KeeperLoader.Runtime
         private readonly string _loaderDirectory;
         private readonly FileLogger _coreLog;
         private readonly List<LoadedMod> _loaded = new List<LoadedMod>();
+        private readonly ExternalPluginCatalog _external;
 
         public ModCatalog(string loaderDirectory, FileLogger coreLog)
         {
             _loaderDirectory = loaderDirectory;
             _coreLog = coreLog;
+            _external = new ExternalPluginCatalog(loaderDirectory, coreLog);
         }
 
         public void DiscoverAndLoad()
@@ -23,6 +25,7 @@ namespace KeeperLoader.Runtime
             string modsDirectory = Path.Combine(_loaderDirectory, "mods");
             Directory.CreateDirectory(modsDirectory);
             List<string> dllList = new List<string>();
+            List<string> externalDirectories = new List<string>();
             string[] modDirectories = Directory.GetDirectories(modsDirectory, "*", SearchOption.TopDirectoryOnly);
             Array.Sort(modDirectories, StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < modDirectories.Length; i++)
@@ -34,8 +37,12 @@ namespace KeeperLoader.Runtime
                     _coreLog.Info("Skipped disabled mod '" + name + "'.");
                     continue;
                 }
-                if (!IsActivatedForCurrentGame(modDirectories[i])) continue;
-                dllList.AddRange(Directory.GetFiles(modDirectories[i], "*.dll", SearchOption.AllDirectories));
+                string entryMode;
+                if (!IsActivatedForCurrentGame(modDirectories[i], out entryMode)) continue;
+                if (entryMode.Equals("external-unity-plugin", StringComparison.OrdinalIgnoreCase))
+                    externalDirectories.Add(modDirectories[i]);
+                else
+                    dllList.AddRange(Directory.GetFiles(modDirectories[i], "*.dll", SearchOption.AllDirectories));
             }
             string[] dlls = dllList.ToArray();
             Array.Sort(dlls, StringComparer.OrdinalIgnoreCase);
@@ -44,11 +51,16 @@ namespace KeeperLoader.Runtime
 
             for (int i = 0; i < dlls.Length; i++) DiscoverAssembly(dlls[i], candidates, byId);
             LoadInDependencyOrder(candidates, byId);
-            _coreLog.Info("Loaded " + _loaded.Count + " mod(s). Discovery found " + candidates.Count + " candidate(s).");
+            int externalLoaded = 0;
+            for (int i = 0; i < externalDirectories.Count; i++)
+                externalLoaded += _external.DiscoverAndLoad(externalDirectories[i]);
+            _coreLog.Info("Loaded " + _loaded.Count + " native mod(s) and " + externalLoaded +
+                " external component(s). Native discovery found " + candidates.Count + " candidate(s).");
         }
 
-        private bool IsActivatedForCurrentGame(string modDirectory)
+        private bool IsActivatedForCurrentGame(string modDirectory, out string entryMode)
         {
+            entryMode = "native";
             string marker = Path.Combine(modDirectory, "keeperloader.activation");
             if (!File.Exists(marker))
             {
@@ -84,6 +96,9 @@ namespace KeeperLoader.Runtime
                         "': activation record does not match this game.");
                     return false;
                 }
+                string declaredMode;
+                if (values.TryGetValue("entry_mode", out declaredMode) && !string.IsNullOrEmpty(declaredMode))
+                    entryMode = declaredMode;
                 return true;
             }
             catch (Exception exception)
@@ -276,6 +291,7 @@ namespace KeeperLoader.Runtime
 
         public void UnloadAll()
         {
+            _external.UnloadAll();
             for (int i = _loaded.Count - 1; i >= 0; i--)
             {
                 try { _loaded[i].Instance.OnUnload(); }
