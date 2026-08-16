@@ -1,0 +1,7 @@
+* text=auto
+*.go text eol=lf
+*.cs text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.manifest text eol=lf
+*.syso binary
