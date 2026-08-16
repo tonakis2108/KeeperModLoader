@@ -43,7 +43,50 @@ jobs:
           CGO_ENABLED: "0"
           GOOS: windows
           GOARCH: amd64
-        run: go build -buildvcs=false -trimpath -ldflags="-s -w -H=windowsgui" -o KeeperLoader-Manager.exe .
+        run: go build -buildvcs=false -trimpath -ldflags="-H=windowsgui" -o KeeperLoader-Manager.exe .
+
+      - name: Verify Windows product metadata
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $metadata = (Get-Item KeeperLoader-Manager.exe).VersionInfo
+          if ($metadata.ProductName -ne "KeeperLoader") {
+            throw "KeeperLoader product metadata is missing"
+          }
+          if ($metadata.ProductVersion -ne $version) {
+            throw "Executable product version does not match VERSION"
+          }
+          if ($metadata.OriginalFilename -ne "KeeperLoader-Manager.exe") {
+            throw "Executable original filename metadata is invalid"
+          }
+
+      - name: Scan build with Microsoft Defender when available
+        shell: pwsh
+        run: |
+          if (-not (Get-Command Get-MpComputerStatus -ErrorAction SilentlyContinue)) {
+            Write-Host "Microsoft Defender cmdlets are unavailable on this runner."
+            exit 0
+          }
+          $status = Get-MpComputerStatus
+          if (-not $status.AntivirusEnabled) {
+            Write-Host "Microsoft Defender Antivirus is disabled on this runner."
+            exit 0
+          }
+          Update-MpSignature -ErrorAction Continue
+          $manager = (Resolve-Path KeeperLoader-Manager.exe).Path
+          try {
+            Start-MpScan -ScanType CustomScan -ScanPath $manager -ErrorAction Stop
+          } catch {
+            Write-Warning "Microsoft Defender could not scan on this hosted runner: $($_.Exception.Message)"
+            exit 0
+          }
+          $detections = Get-MpThreatDetection | Where-Object {
+            $_.Resources -and (($_.Resources -join "`n") -like "*$manager*")
+          }
+          if ($detections) {
+            $detections | Format-List * | Out-String | Write-Host
+            throw "Microsoft Defender detected the KeeperLoader manager build"
+          }
 
       - name: Generate checksum
         shell: pwsh

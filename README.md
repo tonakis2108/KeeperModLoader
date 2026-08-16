@@ -1,4 +1,4 @@
-# KeeperLoader 0.5.1 Alpha
+# KeeperLoader 0.5.2 Alpha
 
 KeeperLoader is a compact, general-purpose mod loader for **Windows Unity Mono games**. It uses UnityDoorstop to enter the game's existing Mono runtime, waits for managed game code to load, attaches one persistent Unity host, and then loads compatible KeeperLoader mods.
 
@@ -22,7 +22,7 @@ Explicitly unsupported in this release:
 - Plugins built for other mod-loader APIs; KeeperLoader uses its own API and lifecycle.
 - Anti-cheat-protected or competitive online games. Do not inject a mod loader where a game's rules prohibit modification.
 
-Unity documents the Windows player as an executable paired with a `ProjectName_Data` directory. Unity also distinguishes Mono's managed JIT runtime from IL2CPP's ahead-of-time native pipeline. UnityDoorstop supports entry into both, but its IL2CPP path requires a separate CoreCLR environment; KeeperLoader 0.5.1 deliberately accepts only the shared Mono path.
+Unity documents the Windows player as an executable paired with a `ProjectName_Data` directory. Unity also distinguishes Mono's managed JIT runtime from IL2CPP's ahead-of-time native pipeline. UnityDoorstop supports entry into both, but its IL2CPP path requires a separate CoreCLR environment; KeeperLoader 0.5.2 deliberately accepts only the shared Mono path.
 
 KeeperLoader retains the deferred initialization introduced in 0.2.1: it creates its Unity host only after the first `SceneManager.sceneLoaded` callback. This avoids invoking `GameObject` APIs during Doorstop's early assembly-loading phase, which could stall startup on a black screen.
 
@@ -30,12 +30,14 @@ KeeperLoader retains the deferred initialization introduced in 0.2.1: it creates
 
 1. Close any games you intend to manage.
 2. Extract this package once and keep it in a convenient location.
-3. Run `KeeperLoader-Manager.exe` and approve the Windows administrator prompt.
+3. Run `KeeperLoader-Manager.exe`. It starts with the permissions of the current user.
 4. Let it scan Steam libraries or use **Add game...** for another location.
 5. Select compatible games (Ctrl-click for several), then choose **Enable / update selected**.
 6. Use **Remove selected** to restore their previous bootstrap files and permanently delete the per-game KeeperLoader installation later.
 
-The alpha executable is not digitally signed, so Windows SmartScreen may display an **Unknown publisher** warning. Confirm that the file came from the original KeeperLoader package and compare it with `SHA256SUMS.txt` before allowing it. Internet access is required the first time the manager downloads the pinned UnityDoorstop bootstrap.
+The alpha executable is not digitally signed. KeeperLoader 0.5.2 adds complete Windows product/version metadata, retains normal Go linker metadata, and no longer requests administrator privileges merely to open the manager. Do not disable Windows security or create an antivirus exclusion to run a detected build. Confirm that the file came from the original KeeperLoader package, compare it with `SHA256SUMS.txt`, and report the exact detection name and file hash for investigation. Internet access is required the first time the manager downloads the pinned UnityDoorstop bootstrap.
+
+Game folders outside protected Windows locations can usually be managed with normal user permissions. If an installation reports **Access denied**, close the manager and deliberately choose **Run as administrator** for that operation only.
 
 The same compiled manager controls all detected games in one batch. **Manage mods...** opens ZIP installation, mod listing, package creation, and permanent uninstall controls for one highlighted game. **Open saves** opens the detected persistent-data location.
 
