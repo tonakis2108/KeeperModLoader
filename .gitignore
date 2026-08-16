@@ -1,0 +1,23 @@
+# Build outputs
+KeeperLoader-Manager.exe
+*.zip
+dist/
+artifacts/
+
+# Go build and test output
+*.test
+*.out
+coverage.*
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.user
+*.suo
+.DS_Store
+Thumbs.db
+
+# Local runtime data
+logs/
+tmp/
+*.log
