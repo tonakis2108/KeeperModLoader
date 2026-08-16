@@ -112,3 +112,30 @@ func TestDisableLoaderRemovesManagedFilesAndRestoresOriginalBootstrap(t *testing
 		t.Fatalf("game save was changed: %q, %v", string(data), err)
 	}
 }
+
+func TestSafeModeIsOnlyRequestedExplicitlyAndCanBeCancelled(t *testing.T) {
+	root := t.TempDir()
+	game := &GameInfo{
+		GameDirectory:  root,
+		ExecutableName: "KeeperLoader-Safe-Mode-Test.exe",
+		ProcessName:    "KeeperLoader Safe Mode Test",
+	}
+	if err := os.MkdirAll(filepath.Join(root, "KeeperLoader", "state"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if safeModeNextLaunchRequested(game) {
+		t.Fatal("safe mode was requested without user action")
+	}
+	if _, err := setSafeModeNextLaunch(game, true); err != nil {
+		t.Fatal(err)
+	}
+	if !safeModeNextLaunchRequested(game) {
+		t.Fatal("explicit safe-mode request was not recorded")
+	}
+	if _, err := setSafeModeNextLaunch(game, false); err != nil {
+		t.Fatal(err)
+	}
+	if safeModeNextLaunchRequested(game) {
+		t.Fatal("safe-mode request was not cancelled")
+	}
+}

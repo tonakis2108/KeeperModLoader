@@ -1,4 +1,4 @@
-# KeeperLoader 0.5.2 Alpha
+# KeeperLoader 0.5.3 Alpha
 
 KeeperLoader is a compact, general-purpose mod loader for **Windows Unity Mono games**. It uses UnityDoorstop to enter the game's existing Mono runtime, waits for managed game code to load, attaches one persistent Unity host, and then loads compatible KeeperLoader mods.
 
@@ -22,7 +22,7 @@ Explicitly unsupported in this release:
 - Plugins built for other mod-loader APIs; KeeperLoader uses its own API and lifecycle.
 - Anti-cheat-protected or competitive online games. Do not inject a mod loader where a game's rules prohibit modification.
 
-Unity documents the Windows player as an executable paired with a `ProjectName_Data` directory. Unity also distinguishes Mono's managed JIT runtime from IL2CPP's ahead-of-time native pipeline. UnityDoorstop supports entry into both, but its IL2CPP path requires a separate CoreCLR environment; KeeperLoader 0.5.2 deliberately accepts only the shared Mono path.
+Unity documents the Windows player as an executable paired with a `ProjectName_Data` directory. Unity also distinguishes Mono's managed JIT runtime from IL2CPP's ahead-of-time native pipeline. UnityDoorstop supports entry into both, but its IL2CPP path requires a separate CoreCLR environment; KeeperLoader 0.5.3 deliberately accepts only the shared Mono path.
 
 KeeperLoader retains the deferred initialization introduced in 0.2.1: it creates its Unity host only after the first `SceneManager.sceneLoaded` callback. This avoids invoking `GameObject` APIs during Doorstop's early assembly-loading phase, which could stall startup on a black screen.
 
@@ -35,7 +35,7 @@ KeeperLoader retains the deferred initialization introduced in 0.2.1: it creates
 5. Select compatible games (Ctrl-click for several), then choose **Enable / update selected**.
 6. Use **Remove selected** to restore their previous bootstrap files and permanently delete the per-game KeeperLoader installation later.
 
-The alpha executable is not digitally signed. KeeperLoader 0.5.2 adds complete Windows product/version metadata, retains normal Go linker metadata, and no longer requests administrator privileges merely to open the manager. Do not disable Windows security or create an antivirus exclusion to run a detected build. Confirm that the file came from the original KeeperLoader package, compare it with `SHA256SUMS.txt`, and report the exact detection name and file hash for investigation. Internet access is required the first time the manager downloads the pinned UnityDoorstop bootstrap.
+The alpha executable is not digitally signed. KeeperLoader adds complete Windows product/version metadata, retains normal Go linker metadata, and does not request administrator privileges merely to open the manager. Do not disable Windows security or create an antivirus exclusion to run a detected build. Confirm that the file came from the original KeeperLoader package, compare it with `SHA256SUMS.txt`, and report the exact detection name and file hash for investigation. Internet access is required the first time the manager downloads the pinned UnityDoorstop bootstrap.
 
 Game folders outside protected Windows locations can usually be managed with normal user permissions. If an installation reports **Access denied**, close the manager and deliberately choose **Run as administrator** for that operation only.
 
@@ -43,7 +43,7 @@ The same compiled manager controls all detected games in one batch. **Manage mod
 
 Each game process still requires a small local Doorstop bridge and core compiled against that game's Unity assemblies. The Universal Manager creates and maintains those files automatically; users do not run separate installers or keep separate setup packages.
 
-When KeeperLoader activates, a small green **KL check-mark** badge appears in the upper-right corner for 30 seconds. It remains available on scenes whose names identify them as menu, title, frontend, or lobby screens. Hovering over it displays **KeeperLoader activated**. If crash-recovery safe mode is active, the badge changes to an amber **KL !** and reports that mods are paused. The badge is rendered by the loader and requires no external image file.
+When KeeperLoader activates, a small green **KL check-mark** badge appears in the upper-right corner for 30 seconds. It remains available on scenes whose names identify them as menu, title, frontend, or lobby screens. Hovering over it displays **KeeperLoader activated**. If the user explicitly selected safe mode for that launch, the badge changes to an amber **KL !** and reports that mods are paused. The badge is rendered by the loader and requires no external image file.
 
 The manager remembers detected and manually added game locations in `%LOCALAPPDATA%\KeeperLoader\manager.json`. Replacing or updating the manager executable does not remove this file.
 
@@ -116,7 +116,7 @@ KeeperLoader can provide the same loader-level facilities across supported games
 - Mod discovery and dependency ordering
 - Per-mod logging, configuration, and state directories
 - Exception isolation and automatic disabling after repeated callback failures
-- Crash-recovery safe mode
+- User-selected, one-launch safe mode
 - Validated ZIP installation, listing, updates, rollback, and complete uninstall
 
 Game behavior is not standardized. Player types, inventories, maps, quests, save formats, and camera logic differ between games. A loader may be portable while a minimap or gameplay mod is not. Package compatibility declarations prevent that distinction from becoming an expensive surprise.
@@ -131,9 +131,11 @@ Installation is staged. Updating a mod moves the previous version to `KeeperLoad
 
 These checks detect corruption and manifest/payload mismatches. They do not authenticate a publisher or prove that mod code is safe. Only install packages from sources you trust.
 
-## Listing and uninstalling mods
+## Listing, disabling, enabling, and uninstalling mods
 
-The selected game's management window lists active mods by name, version, and ID. **Uninstall selected** permanently deletes the active mod folder, its `KeeperLoader\config\<mod-id>.cfg` file, its `KeeperLoader\state\<mod-id>` directory, and matching mod backups.
+The selected game's management window lists installed mods by status, name, version, and ID. **Enable / disable selected** is reversible: disabling adds a small manager marker and prevents the runtime from loading that mod, while its files, configuration, state, backups, and game saves remain untouched. Disabled status is preserved through mod updates and rollback. Enabling removes the marker and loads the mod on the next game launch.
+
+**Uninstall selected** permanently deletes the installed mod folder, its `KeeperLoader\config\<mod-id>.cfg` file, its `KeeperLoader\state\<mod-id>` directory, and matching mod backups.
 
 Game save files remain untouched. Uninstall cannot be undone, and it cannot make a save independent of content previously written by a mod.
 
@@ -176,7 +178,7 @@ Game Folder/
 
 ## Safe mode and removal
 
-KeeperLoader writes a boot marker at startup and removes it on clean shutdown. Following an unclean exit, the next run skips mods. Close that safe-mode run normally and restart to load mods again.
+Safe mode is never activated automatically. In **Manage mods...**, select **Safe mode next launch** to skip every mod for one game launch. The request is consumed when the game starts, so the following launch returns to normal automatically. Use **Cancel safe mode request** before starting the game if you change your mind.
 
 If the game cannot reach its first scene, rename the game-folder `winhttp.dll` to `winhttp.keeperloader-disabled.dll` to pause injection immediately. This does not touch mods, configurations, state, or saves. The manager can then perform a complete removal.
 

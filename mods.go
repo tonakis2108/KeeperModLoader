@@ -40,10 +40,22 @@ type InstalledMod struct {
 	Name    string
 	Version string
 	Path    string
+	Enabled bool
 }
 
 func (m *InstalledMod) String() string {
-	return fmt.Sprintf("%s  |  %s  |  %s", m.Name, m.Version, m.ID)
+	status := "Disabled"
+	if m.Enabled {
+		status = "Enabled"
+	}
+	return fmt.Sprintf("[%s]  %s  |  %s  |  %s", status, m.Name, m.Version, m.ID)
+}
+
+const modDisabledMarker = "keeperloader.disabled"
+
+func reservedModControlPath(name string) bool {
+	key := strings.ToLower(filepath.ToSlash(name))
+	return key == "keepermod.json" || key == "keeperloader.activation" || key == modDisabledMarker
 }
 
 var (
@@ -72,7 +84,8 @@ func installedMods(game *GameInfo) ([]*InstalledMod, error) {
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
-		mod := &InstalledMod{ID: entry.Name(), Name: entry.Name(), Version: "unknown", Path: filepath.Join(modsRoot, entry.Name())}
+		mod := &InstalledMod{ID: entry.Name(), Name: entry.Name(), Version: "unknown", Path: filepath.Join(modsRoot, entry.Name()), Enabled: true}
+		mod.Enabled = !fileExists(filepath.Join(mod.Path, modDisabledMarker))
 		if data, readErr := os.ReadFile(filepath.Join(mod.Path, "keepermod.json")); readErr == nil {
 			var manifest ModManifest
 			if json.Unmarshal(data, &manifest) == nil {
@@ -299,6 +312,9 @@ func installModPackageWithOptions(game *GameInfo, zipPath string, options modIns
 			return nil, "", fmt.Errorf("mod package rejected: %w", pathErr)
 		}
 		key := strings.ToLower(name)
+		if reservedModControlPath(key) {
+			return nil, "", fmt.Errorf("mod package rejected: reserved KeeperLoader control path %q", name)
+		}
 		if _, duplicate := declared[key]; duplicate {
 			return nil, "", fmt.Errorf("mod package rejected: duplicate manifest path %q", name)
 		}
@@ -402,6 +418,13 @@ func installModPackageWithOptions(game *GameInfo, zipPath string, options modIns
 	}
 
 	target := filepath.Join(modsRoot, manifest.ID)
+	keepDisabled := dirExists(target) && fileExists(filepath.Join(target, modDisabledMarker))
+	if keepDisabled {
+		disabledRecord := "disabled_by_manager=true\r\n"
+		if err = os.WriteFile(filepath.Join(staging, modDisabledMarker), []byte(disabledRecord), 0644); err != nil {
+			return nil, "", err
+		}
+	}
 	backup := ""
 	if dirExists(target) {
 		backupRoot := filepath.Join(loader, "backup", "mods")
@@ -422,21 +445,51 @@ func installModPackageWithOptions(game *GameInfo, zipPath string, options modIns
 		return nil, "", err
 	}
 	stagingActive = false
-	return &InstalledMod{ID: manifest.ID, Name: manifest.Name, Version: manifest.Version, Path: target}, backup, nil
+	return &InstalledMod{ID: manifest.ID, Name: manifest.Name, Version: manifest.Version, Path: target, Enabled: !keepDisabled}, backup, nil
+}
+
+func validateInstalledModPath(game *GameInfo, mod *InstalledMod) error {
+	if mod == nil || !modIDPattern.MatchString(mod.ID) || !dirExists(mod.Path) {
+		return errors.New("the selected mod is not installed")
+	}
+	expected := filepath.Join(game.GameDirectory, "KeeperLoader", "mods", mod.ID)
+	if !strings.EqualFold(filepath.Clean(mod.Path), filepath.Clean(expected)) {
+		return errors.New("the selected mod path is outside the KeeperLoader mods directory")
+	}
+	return nil
+}
+
+func setModEnabled(game *GameInfo, mod *InstalledMod, enabled bool) (string, error) {
+	if err := assertGameStopped(game); err != nil {
+		return "", err
+	}
+	if err := validateInstalledModPath(game, mod); err != nil {
+		return "", err
+	}
+	marker := filepath.Join(mod.Path, modDisabledMarker)
+	if enabled {
+		if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
+			return "", err
+		}
+		mod.Enabled = true
+		return mod.Name + " enabled. It will load the next time the game starts.", nil
+	}
+	record := "disabled_by_manager=true\r\ndisabled_at_utc=" + time.Now().UTC().Format(time.RFC3339Nano) + "\r\n"
+	if err := writeAtomic(marker, []byte(record), 0644); err != nil {
+		return "", err
+	}
+	mod.Enabled = false
+	return mod.Name + " disabled. Files, configuration, state, backups, and saves were preserved.", nil
 }
 
 func uninstallMod(game *GameInfo, mod *InstalledMod) (string, error) {
 	if err := assertGameStopped(game); err != nil {
 		return "", err
 	}
-	if !modIDPattern.MatchString(mod.ID) || !dirExists(mod.Path) {
-		return "", errors.New("the selected mod is not installed")
+	if err := validateInstalledModPath(game, mod); err != nil {
+		return "", err
 	}
 	loader := filepath.Join(game.GameDirectory, "KeeperLoader")
-	expectedModPath := filepath.Join(loader, "mods", mod.ID)
-	if !strings.EqualFold(filepath.Clean(mod.Path), filepath.Clean(expectedModPath)) {
-		return "", errors.New("the selected mod path is outside the KeeperLoader mods directory")
-	}
 	for _, path := range []string{
 		mod.Path,
 		filepath.Join(loader, "config", mod.ID+".cfg"),
@@ -473,9 +526,10 @@ func restorePreviousMod(game *GameInfo, current *InstalledMod) (*InstalledMod, s
 	if err := assertGameStopped(game); err != nil {
 		return nil, "", err
 	}
-	if current == nil || !modIDPattern.MatchString(current.ID) || !dirExists(current.Path) {
-		return nil, "", errors.New("the selected mod is not installed")
+	if err := validateInstalledModPath(game, current); err != nil {
+		return nil, "", err
 	}
+	keepDisabled := fileExists(filepath.Join(current.Path, modDisabledMarker))
 	loader := filepath.Join(game.GameDirectory, "KeeperLoader")
 	backupRoot := filepath.Join(loader, "backup", "mods")
 	entries, err := os.ReadDir(backupRoot)
@@ -515,6 +569,14 @@ func restorePreviousMod(game *GameInfo, current *InstalledMod) (*InstalledMod, s
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].modified.After(candidates[j].modified) })
 	previous := candidates[0]
+	previousMarker := filepath.Join(previous.path, modDisabledMarker)
+	if keepDisabled {
+		if err = writeAtomic(previousMarker, []byte("disabled_by_manager=true\r\n"), 0644); err != nil {
+			return nil, "", err
+		}
+	} else if err = os.Remove(previousMarker); err != nil && !os.IsNotExist(err) {
+		return nil, "", err
+	}
 	currentBackup := uniqueTimestampPath(backupRoot, current.ID+"-before-restore")
 	if err = os.Rename(current.Path, currentBackup); err != nil {
 		return nil, "", err
@@ -525,7 +587,7 @@ func restorePreviousMod(game *GameInfo, current *InstalledMod) (*InstalledMod, s
 		_ = os.Rename(currentBackup, current.Path)
 		return nil, "", err
 	}
-	return &InstalledMod{ID: previous.manifest.ID, Name: previous.manifest.Name, Version: previous.manifest.Version, Path: current.Path}, currentBackup, nil
+	return &InstalledMod{ID: previous.manifest.ID, Name: previous.manifest.Name, Version: previous.manifest.Version, Path: current.Path, Enabled: !keepDisabled}, currentBackup, nil
 }
 
 func createModPackage(sourceFolder, modID, modName, version string, supportedGames []string, minimumVersion, outputZip string) error {
@@ -564,10 +626,13 @@ func createModPackage(sourceFolder, modID, modName, version string, supportedGam
 		if walkErr != nil {
 			return walkErr
 		}
-		if info.IsDir() || strings.EqualFold(info.Name(), "keepermod.json") {
+		if info.IsDir() {
 			return nil
 		}
 		relative, _ := filepath.Rel(sourceFolder, path)
+		if reservedModControlPath(relative) {
+			return nil
+		}
 		if blockedExtensions[strings.ToLower(filepath.Ext(relative))] {
 			return fmt.Errorf("blocked executable or script %q", relative)
 		}

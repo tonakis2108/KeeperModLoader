@@ -57,12 +57,12 @@ namespace KeeperLoader.Runtime
             _log = new FileLogger(Path.Combine(_loaderDirectory, "logs", "latest.log"), "Core");
             _badgeVisibleUntil = Time.realtimeSinceStartup + 30f;
             _safeMode = string.Equals(Environment.GetEnvironmentVariable("KEEPERLOADER_SAFE_MODE"), "1");
-            _log.Info("KeeperLoader runtime 0.5.2 initialized for " +
+            _log.Info("KeeperLoader runtime 0.5.3 initialized for " +
                 Environment.GetEnvironmentVariable("KEEPERLOADER_GAME_ID") +
                 (_safeMode ? " in SAFE MODE." : "."));
             _catalog = new ModCatalog(_loaderDirectory, _log);
             if (!_safeMode) _catalog.DiscoverAndLoad();
-            else _log.Warning("Mods were skipped. Close the game normally, then restart to leave safe mode.");
+            else _log.Warning("Mods were skipped for this user-selected safe-mode launch only.");
         }
 
         private void Update()
@@ -128,15 +128,6 @@ namespace KeeperLoader.Runtime
         private void OnApplicationQuit()
         {
             if (_catalog != null) _catalog.UnloadAll();
-            try
-            {
-                string bootLock = Path.Combine(_loaderDirectory, "state", "boot.lock");
-                if (File.Exists(bootLock)) File.Delete(bootLock);
-            }
-            catch (Exception exception)
-            {
-                if (_log != null) _log.Error("Could not clear the clean-shutdown marker.", exception);
-            }
         }
     }
 }

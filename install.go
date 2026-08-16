@@ -18,6 +18,7 @@ import (
 const (
 	doorstopURL    = "https://github.com/NeighTools/UnityDoorstop/releases/download/v4.5.0/doorstop_win_release_4.5.0.zip"
 	doorstopSHA256 = "7bb953e8d883c8bde76ced96f6d0e45660ad6e0151880d8ab5856bf4f532b147"
+	safeModeMarker = "safe-mode.next"
 )
 
 //go:embed src/API/KeeperLoaderApi.cs src/Bootstrap/Entrypoint.cs src/Runtime/*.cs
@@ -398,4 +399,30 @@ func disableLoader(game *GameInfo) (string, error) {
 		return "", err
 	}
 	return "KeeperLoader removed completely. Original bootstrap files were restored when available; game saves were not touched.", nil
+}
+
+func safeModeNextLaunchRequested(game *GameInfo) bool {
+	return fileExists(filepath.Join(game.GameDirectory, "KeeperLoader", "state", safeModeMarker))
+}
+
+func setSafeModeNextLaunch(game *GameInfo, requested bool) (string, error) {
+	if err := assertGameStopped(game); err != nil {
+		return "", err
+	}
+	loader := filepath.Join(game.GameDirectory, "KeeperLoader")
+	if !dirExists(loader) {
+		return "", errors.New("KeeperLoader is not installed for this game")
+	}
+	marker := filepath.Join(loader, "state", safeModeMarker)
+	if !requested {
+		if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
+			return "", err
+		}
+		return "Safe mode request cancelled. Mods will load normally on the next launch.", nil
+	}
+	record := "requested_by_user=true\r\nrequested_at_utc=" + time.Now().UTC().Format(time.RFC3339Nano) + "\r\n"
+	if err := writeAtomic(marker, []byte(record), 0644); err != nil {
+		return "", err
+	}
+	return "Safe mode selected for the next launch only. Mods will be skipped once.", nil
 }

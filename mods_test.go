@@ -87,6 +87,16 @@ func TestModUpdatePreservesDataRejectsWrongPackageAndRestores(t *testing.T) {
 	if err = os.WriteFile(statePath, []byte("persistent-state"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = setModEnabled(game, installed, false); err != nil {
+		t.Fatal(err)
+	}
+	if installed.Enabled || !fileExists(filepath.Join(installed.Path, modDisabledMarker)) {
+		t.Fatal("mod was not disabled")
+	}
+	listed, listErr := installedMods(game)
+	if listErr != nil || len(listed) != 1 || listed[0].Enabled {
+		t.Fatalf("disabled mod was not listed correctly: %#v, %v", listed, listErr)
+	}
 	versionTwo := filepath.Join(t.TempDir(), "test-mod-1.1.0.zip")
 	writeTestModPackage(t, versionTwo, installed.ID, "1.1.0", game.GameID)
 	updated, backup, err := updateModPackage(game, installed, versionTwo)
@@ -95,6 +105,9 @@ func TestModUpdatePreservesDataRejectsWrongPackageAndRestores(t *testing.T) {
 	}
 	if updated.Version != "1.1.0" || backup == "" || !dirExists(backup) {
 		t.Fatalf("unexpected update result: version=%s backup=%s", updated.Version, backup)
+	}
+	if updated.Enabled || !fileExists(filepath.Join(updated.Path, modDisabledMarker)) {
+		t.Fatal("mod update did not preserve disabled status")
 	}
 	if data, readErr := os.ReadFile(configPath); readErr != nil || string(data) != "setting=true" {
 		t.Fatalf("configuration was not preserved: %q, %v", string(data), readErr)
@@ -117,11 +130,26 @@ func TestModUpdatePreservesDataRejectsWrongPackageAndRestores(t *testing.T) {
 	if restored.Version != "1.0.0" {
 		t.Fatalf("expected restored version 1.0.0, got %s", restored.Version)
 	}
+	if restored.Enabled || !fileExists(filepath.Join(restored.Path, modDisabledMarker)) {
+		t.Fatal("mod restore did not preserve disabled status")
+	}
 	if data, readErr := os.ReadFile(configPath); readErr != nil || string(data) != "setting=true" {
 		t.Fatalf("configuration was not preserved through rollback: %q, %v", string(data), readErr)
 	}
 	if data, readErr := os.ReadFile(statePath); readErr != nil || string(data) != "persistent-state" {
 		t.Fatalf("state was not preserved through rollback: %q, %v", string(data), readErr)
+	}
+	if _, err = setModEnabled(game, restored, true); err != nil {
+		t.Fatal(err)
+	}
+	if !restored.Enabled || fileExists(filepath.Join(restored.Path, modDisabledMarker)) {
+		t.Fatal("mod was not enabled again")
+	}
+	if data, readErr := os.ReadFile(configPath); readErr != nil || string(data) != "setting=true" {
+		t.Fatalf("configuration was changed by disable/enable: %q, %v", string(data), readErr)
+	}
+	if data, readErr := os.ReadFile(statePath); readErr != nil || string(data) != "persistent-state" {
+		t.Fatalf("state was changed by disable/enable: %q, %v", string(data), readErr)
 	}
 	savePath := filepath.Join(root, "game-save.dat")
 	if err = os.WriteFile(savePath, []byte("save data"), 0644); err != nil {

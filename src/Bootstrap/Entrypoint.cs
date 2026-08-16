@@ -30,11 +30,11 @@ namespace Doorstop
                 Directory.CreateDirectory(Path.Combine(_loaderDirectory, "config"));
                 _logPath = Path.Combine(_loaderDirectory, "logs", "latest.log");
                 RotateLog();
-                Log("KeeperLoader bootstrap 0.5.2 starting.");
+                Log("KeeperLoader bootstrap 0.5.3 starting.");
                 Log("Process path: " + processPath);
 
-                PrepareCrashRecovery();
-                Log("Crash recovery initialized.");
+                PrepareEnvironment();
+                Log("KeeperLoader environment initialized.");
                 BuildStartupAssemblySet();
                 Log("Startup assembly triggers initialized.");
                 BuildAssemblyIndex();
@@ -58,19 +58,25 @@ namespace Doorstop
             }
         }
 
-        private static void PrepareCrashRecovery()
+        private static void PrepareEnvironment()
         {
             string stateDirectory = Path.Combine(_loaderDirectory, "state");
-            string bootLock = Path.Combine(stateDirectory, "boot.lock");
-            if (File.Exists(bootLock))
+            string safeModeRequest = Path.Combine(stateDirectory, "safe-mode.next");
+            Environment.SetEnvironmentVariable("KEEPERLOADER_SAFE_MODE", null);
+            if (File.Exists(safeModeRequest))
             {
-                string previousCrash = Path.Combine(stateDirectory,
-                    "unclean-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + ".lock");
-                try { File.Move(bootLock, previousCrash); } catch { }
-                Environment.SetEnvironmentVariable("KEEPERLOADER_SAFE_MODE", "1");
-                Log("Previous run did not close cleanly. Safe mode is enabled for this run.");
+                try
+                {
+                    File.Delete(safeModeRequest);
+                    Environment.SetEnvironmentVariable("KEEPERLOADER_SAFE_MODE", "1");
+                    Log("User-selected safe mode is enabled for this launch only.");
+                }
+                catch (Exception exception)
+                {
+                    Log("Could not consume the safe-mode request; continuing with mods enabled: " +
+                        exception.Message);
+                }
             }
-            File.WriteAllText(bootLock, DateTime.UtcNow.ToString("O"));
             Environment.SetEnvironmentVariable("KEEPERLOADER_GAME_DIR", _gameDirectory);
             Environment.SetEnvironmentVariable("KEEPERLOADER_DIR", _loaderDirectory);
             string processPath = Environment.GetEnvironmentVariable("DOORSTOP_PROCESS_PATH");
@@ -172,7 +178,22 @@ namespace Doorstop
         {
             _assemblyIndex = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             IndexDirectory(Path.Combine(_loaderDirectory, "core"));
-            IndexDirectory(Path.Combine(_loaderDirectory, "mods"));
+            if (!string.Equals(Environment.GetEnvironmentVariable("KEEPERLOADER_SAFE_MODE"), "1",
+                StringComparison.Ordinal))
+            {
+                string modsDirectory = Path.Combine(_loaderDirectory, "mods");
+                if (Directory.Exists(modsDirectory))
+                {
+                    string[] modDirectories = Directory.GetDirectories(modsDirectory, "*",
+                        SearchOption.TopDirectoryOnly);
+                    Array.Sort(modDirectories, StringComparer.OrdinalIgnoreCase);
+                    for (int i = 0; i < modDirectories.Length; i++)
+                    {
+                        if (File.Exists(Path.Combine(modDirectories[i], "keeperloader.disabled"))) continue;
+                        IndexDirectory(modDirectories[i]);
+                    }
+                }
+            }
         }
 
         private static void IndexDirectory(string directory)

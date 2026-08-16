@@ -29,6 +29,11 @@ namespace KeeperLoader.Runtime
             {
                 string name = Path.GetFileName(modDirectories[i]);
                 if (name.StartsWith(".", StringComparison.Ordinal)) continue;
+                if (File.Exists(Path.Combine(modDirectories[i], "keeperloader.disabled")))
+                {
+                    _coreLog.Info("Skipped disabled mod '" + name + "'.");
+                    continue;
+                }
                 if (!IsActivatedForCurrentGame(modDirectories[i])) continue;
                 dllList.AddRange(Directory.GetFiles(modDirectories[i], "*.dll", SearchOption.AllDirectories));
             }

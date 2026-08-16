@@ -294,7 +294,7 @@ func showModManager(owner walk.Form, game *GameInfo) {
 	var dlg *walk.Dialog
 	var list *walk.ListBox
 	var status *walk.Label
-	var installButton, updateButton, restoreButton, uninstallButton, packageButton, openButton, closeButton *walk.PushButton
+	var installButton, toggleButton, updateButton, restoreButton, uninstallButton, safeModeButton, packageButton, openButton, closeButton *walk.PushButton
 	refresh := func() { items, _ := installedMods(game); model.reset(items) }
 	decl := Dialog{
 		AssignTo: &dlg, Title: "KeeperLoader Mods — " + game.ProcessName, FixedSize: false,
@@ -303,7 +303,7 @@ func showModManager(owner walk.Form, game *GameInfo) {
 		Children: []Widget{
 			Label{Text: fmt.Sprintf("%s  |  game id: %s  |  Unity %s %s", game.ExecutableName, game.GameID, game.Backend, game.Architecture)},
 			ListBox{AssignTo: &list, Model: model, MinSize: Size{Height: 260}},
-			Label{Text: "ZIP packages are checked before activation. Uninstall permanently removes that mod's files and data."},
+			Label{Text: "Disable is reversible and preserves mod data. Uninstall permanently deletes that mod's files and data."},
 			Composite{Layout: HBox{MarginsZero: true, Spacing: 7}, Children: []Widget{
 				PushButton{AssignTo: &installButton, Text: "Install Mod ZIP…", OnClicked: func() {
 					fileDialog := &walk.FileDialog{Title: "Select a KeeperLoader mod package", Filter: "KeeperLoader mod package (*.zip)|*.zip"}
@@ -328,6 +328,21 @@ func showModManager(owner walk.Form, game *GameInfo) {
 					if backup != "" {
 						message += " Previous version backed up."
 					}
+					status.SetText(message)
+				}},
+				PushButton{AssignTo: &toggleButton, Text: "Enable / disable selected", OnClicked: func() {
+					index := list.CurrentIndex()
+					if index < 0 || index >= len(model.items) {
+						walk.MsgBox(dlg, "No mod selected", "Select one installed mod first.", walk.MsgBoxIconInformation)
+						return
+					}
+					mod := model.items[index]
+					message, toggleErr := setModEnabled(game, mod, !mod.Enabled)
+					if toggleErr != nil {
+						walk.MsgBox(dlg, "Mod status change failed", toggleErr.Error(), walk.MsgBoxIconError)
+						return
+					}
+					refresh()
 					status.SetText(message)
 				}},
 				PushButton{AssignTo: &updateButton, Text: "Update selected from ZIP…", OnClicked: func() {
@@ -382,7 +397,7 @@ func showModManager(owner walk.Form, game *GameInfo) {
 						return
 					}
 					mod := model.items[index]
-					if walk.MsgBox(dlg, "Confirm permanent uninstall", "Permanently uninstall "+mod.Name+"?\r\n\r\nThe active mod, its configuration, state, and backups will be deleted. Game saves are not touched.\r\n\r\nThis cannot be undone.", walk.MsgBoxYesNo|walk.MsgBoxIconWarning) != walk.DlgCmdYes {
+					if walk.MsgBox(dlg, "Confirm permanent uninstall", "Permanently uninstall "+mod.Name+"?\r\n\r\nThe installed mod, its configuration, state, and backups will be deleted. Game saves are not touched.\r\n\r\nThis cannot be undone.", walk.MsgBoxYesNo|walk.MsgBoxIconWarning) != walk.DlgCmdYes {
 						return
 					}
 					message, err := uninstallMod(game, mod)
@@ -395,6 +410,16 @@ func showModManager(owner walk.Form, game *GameInfo) {
 				}},
 			}},
 			Composite{Layout: HBox{MarginsZero: true, Spacing: 7}, Children: []Widget{
+				PushButton{AssignTo: &safeModeButton, Text: safeModeButtonText(game), OnClicked: func() {
+					requested := !safeModeNextLaunchRequested(game)
+					message, safeModeErr := setSafeModeNextLaunch(game, requested)
+					if safeModeErr != nil {
+						walk.MsgBox(dlg, "Safe mode", safeModeErr.Error(), walk.MsgBoxIconError)
+						return
+					}
+					safeModeButton.SetText(safeModeButtonText(game))
+					status.SetText(message)
+				}},
 				PushButton{AssignTo: &packageButton, Text: "Build Mod ZIP…", OnClicked: func() { showPackageBuilder(dlg, game) }},
 				PushButton{AssignTo: &openButton, Text: "Open mods folder", OnClicked: func() { _ = openExplorer(filepath.Join(game.GameDirectory, "KeeperLoader", "mods")) }},
 				HSpacer{}, PushButton{AssignTo: &closeButton, Text: "Close", OnClicked: func() { dlg.Accept() }},
@@ -404,15 +429,24 @@ func showModManager(owner walk.Form, game *GameInfo) {
 	}
 	_, err := decl.Run(owner)
 	_ = installButton
+	_ = toggleButton
 	_ = updateButton
 	_ = restoreButton
 	_ = uninstallButton
+	_ = safeModeButton
 	_ = packageButton
 	_ = openButton
 	_ = closeButton
 	if err != nil {
 		walk.MsgBox(owner, "Mod manager", err.Error(), walk.MsgBoxIconError)
 	}
+}
+
+func safeModeButtonText(game *GameInfo) string {
+	if safeModeNextLaunchRequested(game) {
+		return "Cancel safe mode request"
+	}
+	return "Safe mode next launch"
 }
 
 func showPackageBuilder(owner walk.Form, game *GameInfo) {

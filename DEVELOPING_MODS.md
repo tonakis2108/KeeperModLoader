@@ -51,6 +51,8 @@ Players install the resulting ZIP through **Install Mod ZIP...**. KeeperLoader v
 
 For the dedicated **Update selected from ZIP...** workflow, keep the mod ID unchanged and increase the numeric version. The manager rejects ID changes, equal versions, and downgrades. Mod settings should remain in `KeeperContext.ConfigDirectory` and persistent data in `KeeperContext.StateDirectory`; those locations are preserved across updates and rollback.
 
+Users can disable a mod through the manager without uninstalling it. KeeperLoader skips the disabled mod's assemblies and preserves its package files, configuration, state, and backups. A disabled mod receives no lifecycle callbacks until the user enables it and starts the game again.
+
 Every package must list explicit normalized game IDs shown by the manager. Wildcard compatibility is rejected, including for UI-only mods. Multiple IDs are entered as a comma-separated list.
 
 ## Metadata rules
