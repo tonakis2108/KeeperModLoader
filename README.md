@@ -19,7 +19,7 @@ Explicitly unsupported in this release:
 
 - Unity IL2CPP games. IL2CPP turns managed game code into native code and requires a different CoreCLR/native-interoperability runtime.
 - Linux, macOS, consoles, UWP, and ARM64.
-- BepInEx plugins; KeeperLoader uses its own API and lifecycle.
+- Plugins built for other mod-loader APIs; KeeperLoader uses its own API and lifecycle.
 - Anti-cheat-protected or competitive online games. Do not inject a mod loader where a game's rules prohibit modification.
 
 Unity documents the Windows player as an executable paired with a `ProjectName_Data` directory. Unity also distinguishes Mono's managed JIT runtime from IL2CPP's ahead-of-time native pipeline. UnityDoorstop supports entry into both, but its IL2CPP path requires a separate CoreCLR environment; KeeperLoader 0.4.1 deliberately accepts only the shared Mono path.
@@ -154,7 +154,7 @@ Select the game in `KeeperLoader-Manager.exe` and choose **Disable selected** to
 
 - Alpha software; test each game separately and back up important saves.
 - Runtime integration cannot be tested here against every commercial Unity build.
-- No IL2CPP runtime, BepInEx compatibility shim, global patching framework, or live assembly unloading.
+- No IL2CPP runtime, compatibility shim for third-party mod loaders, global patching framework, or live assembly unloading.
 - Some games use custom launchers, native wrappers, DRM, or anti-cheat systems that can prevent Doorstop injection.
 
 KeeperLoader itself does not write to game saves.
