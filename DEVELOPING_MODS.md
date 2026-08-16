@@ -49,6 +49,8 @@ For distribution, do not ask players to copy that directory manually. Put the co
 
 Players install the resulting ZIP through **Install Mod ZIP...**. KeeperLoader verifies its manifest and every file hash, stages installation, and backs up an older version with the same mod ID.
 
+For the dedicated **Update selected from ZIP...** workflow, keep the mod ID unchanged and increase the numeric version. The manager rejects ID changes, equal versions, and downgrades. Mod settings should remain in `KeeperContext.ConfigDirectory` and persistent data in `KeeperContext.StateDirectory`; those locations are preserved across updates and rollback.
+
 Every package must list explicit normalized game IDs shown by the manager. Wildcard compatibility is rejected, including for UI-only mods. Multiple IDs are entered as a comma-separated list.
 
 ## Metadata rules

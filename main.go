@@ -51,11 +51,14 @@ type application struct {
 }
 
 func main() {
+	if handleManagerUpdateMode() {
+		return
+	}
 	app := &application{model: &gameListModel{}}
-	var scanButton, addButton, enableButton, disableButton, manageButton, savesButton *walk.PushButton
+	var scanButton, addButton, managerUpdateButton, enableButton, disableButton, manageButton, savesButton *walk.PushButton
 	window := MainWindow{
 		AssignTo: &app.mw,
-		Title:    "KeeperLoader Universal Manager 0.4.1",
+		Title:    "KeeperLoader Universal Manager " + loaderVersion,
 		MinSize:  Size{Width: 850, Height: 580},
 		Size:     Size{Width: 980, Height: 650},
 		Layout:   VBox{MarginsZero: false, Spacing: 8},
@@ -66,8 +69,12 @@ func main() {
 			Composite{Layout: HBox{MarginsZero: true, Spacing: 7}, Children: []Widget{
 				PushButton{AssignTo: &scanButton, Text: "Scan Steam", OnClicked: func() { app.scanSteam() }},
 				PushButton{AssignTo: &addButton, Text: "Add game…", OnClicked: func() { app.addGame() }},
+				PushButton{AssignTo: &managerUpdateButton, Text: "Install manager update…", OnClicked: func() { app.installManagerUpdate() }},
 				HSpacer{},
-				PushButton{AssignTo: &enableButton, Text: "Enable selected", OnClicked: func() { app.enableSelected() }},
+			}},
+			Composite{Layout: HBox{MarginsZero: true, Spacing: 7}, Children: []Widget{
+				HSpacer{},
+				PushButton{AssignTo: &enableButton, Text: "Enable / update selected", OnClicked: func() { app.enableSelected() }},
 				PushButton{AssignTo: &disableButton, Text: "Disable selected", OnClicked: func() { app.disableSelected() }},
 				PushButton{AssignTo: &manageButton, Text: "Manage mods…", OnClicked: func() { app.manageSelected() }},
 				PushButton{AssignTo: &savesButton, Text: "Open saves", OnClicked: func() { app.openSaves() }},
@@ -81,7 +88,12 @@ func main() {
 		walk.MsgBox(nil, "KeeperLoader", err.Error(), walk.MsgBoxIconError)
 		return
 	}
-	app.buttons = []*walk.PushButton{scanButton, addButton, enableButton, disableButton, manageButton, savesButton}
+	app.buttons = []*walk.PushButton{scanButton, addButton, managerUpdateButton, enableButton, disableButton, manageButton, savesButton}
+	if remembered, rememberErr := loadRememberedGames(); rememberErr != nil {
+		app.appendLog("Could not load remembered game locations: " + rememberErr.Error())
+	} else {
+		app.model.reset(remembered)
+	}
 	app.mw.Starting().Once(func() { app.scanSteam() })
 	app.mw.Run()
 }
@@ -143,6 +155,9 @@ func (app *application) scanSteam() {
 				return
 			}
 			app.model.reset(mergeGames(app.model.items, games))
+			if saveErr := saveRememberedGames(app.model.items); saveErr != nil {
+				app.appendLog("Could not remember game locations: " + saveErr.Error())
+			}
 			app.appendLog(fmt.Sprintf("Steam scan found %d compatible game(s).", len(games)))
 		})
 	}()
@@ -169,6 +184,9 @@ func (app *application) addGame() {
 		return
 	}
 	app.model.reset(mergeGames(app.model.items, []*GameInfo{game}))
+	if err = saveRememberedGames(app.model.items); err != nil {
+		app.appendLog("Could not remember game locations: " + err.Error())
+	}
 	app.appendLog("Added " + game.ProcessName + ".")
 }
 
@@ -177,7 +195,7 @@ func (app *application) enableSelected() {
 	if len(games) == 0 {
 		return
 	}
-	app.setBusy(true, "Enabling KeeperLoader…")
+	app.setBusy(true, "Enabling or updating KeeperLoader…")
 	go func() {
 		for _, game := range games {
 			backup, err := enableLoader(game)
@@ -185,11 +203,11 @@ func (app *application) enableSelected() {
 				if err != nil {
 					app.appendLog("Could not enable " + game.ProcessName + ": " + err.Error())
 				} else {
-					app.appendLog("Enabled for " + game.ProcessName + ". Original bootstrap backup: " + backup)
+					app.appendLog("Enabled/updated " + game.ProcessName + " to KeeperLoader " + loaderVersion + ". Original bootstrap backup: " + backup)
 				}
 			})
 		}
-		app.mw.Synchronize(func() { app.model.PublishItemsReset(); app.setBusy(false, "Enable operation completed.") })
+		app.mw.Synchronize(func() { app.model.PublishItemsReset(); app.setBusy(false, "Enable/update operation completed.") })
 	}()
 }
 
@@ -246,6 +264,29 @@ func (app *application) openSaves() {
 	app.appendLog(message + " " + path)
 }
 
+func (app *application) installManagerUpdate() {
+	dialog := &walk.FileDialog{
+		Title:  "Select KeeperLoader Windows artifact ZIP",
+		Filter: "KeeperLoader Windows artifact (*.zip)|*.zip",
+	}
+	accepted, err := dialog.ShowOpen(app.mw)
+	if err != nil || !accepted {
+		if err != nil {
+			walk.MsgBox(app.mw, "Manager update", err.Error(), walk.MsgBoxIconError)
+		}
+		return
+	}
+	app.setBusy(true, "Validating manager update…")
+	newVersion, err := stageManagerUpdate(dialog.FilePath)
+	if err != nil {
+		app.setBusy(false, "Manager update rejected.")
+		walk.MsgBox(app.mw, "Manager update rejected", err.Error(), walk.MsgBoxIconError)
+		return
+	}
+	walk.MsgBox(app.mw, "Manager update ready", "KeeperLoader "+newVersion+" passed validation. The manager will close, replace itself, and restart. Installed games, mods, settings, state, backups, and saves will not be changed.", walk.MsgBoxIconInformation)
+	app.mw.Close()
+}
+
 func showModManager(owner walk.Form, game *GameInfo) {
 	model := &modListModel{}
 	mods, _ := installedMods(game)
@@ -253,7 +294,7 @@ func showModManager(owner walk.Form, game *GameInfo) {
 	var dlg *walk.Dialog
 	var list *walk.ListBox
 	var status *walk.Label
-	var installButton, uninstallButton, packageButton, openButton, closeButton *walk.PushButton
+	var installButton, updateButton, restoreButton, uninstallButton, packageButton, openButton, closeButton *walk.PushButton
 	refresh := func() { items, _ := installedMods(game); model.reset(items) }
 	decl := Dialog{
 		AssignTo: &dlg, Title: "KeeperLoader Mods — " + game.ProcessName, FixedSize: false,
@@ -289,6 +330,51 @@ func showModManager(owner walk.Form, game *GameInfo) {
 					}
 					status.SetText(message)
 				}},
+				PushButton{AssignTo: &updateButton, Text: "Update selected from ZIP…", OnClicked: func() {
+					index := list.CurrentIndex()
+					if index < 0 || index >= len(model.items) {
+						walk.MsgBox(dlg, "No mod selected", "Select one installed mod first.", walk.MsgBoxIconInformation)
+						return
+					}
+					current := model.items[index]
+					fileDialog := &walk.FileDialog{Title: "Select the newer package for " + current.Name, Filter: "KeeperLoader mod package (*.zip)|*.zip"}
+					accepted, err := fileDialog.ShowOpen(dlg)
+					if err != nil || !accepted {
+						if err != nil {
+							status.SetText(err.Error())
+						}
+						return
+					}
+					status.SetText("Validating mod update…")
+					dlg.SetEnabled(false)
+					updated, backup, updateErr := updateModPackage(game, current, fileDialog.FilePath)
+					dlg.SetEnabled(true)
+					if updateErr != nil {
+						status.SetText(updateErr.Error())
+						walk.MsgBox(dlg, "Mod update rejected", updateErr.Error(), walk.MsgBoxIconError)
+						return
+					}
+					refresh()
+					status.SetText(fmt.Sprintf("%s updated from %s to %s. Previous version: %s", updated.Name, current.Version, updated.Version, backup))
+				}},
+				PushButton{AssignTo: &restoreButton, Text: "Restore previous", OnClicked: func() {
+					index := list.CurrentIndex()
+					if index < 0 || index >= len(model.items) {
+						walk.MsgBox(dlg, "No mod selected", "Select one installed mod first.", walk.MsgBoxIconInformation)
+						return
+					}
+					current := model.items[index]
+					if walk.MsgBox(dlg, "Restore previous mod version", "Restore the most recent backup of "+current.Name+"?\r\n\r\nConfiguration, state, and saves remain untouched.", walk.MsgBoxYesNo|walk.MsgBoxIconWarning) != walk.DlgCmdYes {
+						return
+					}
+					restored, currentBackup, restoreErr := restorePreviousMod(game, current)
+					if restoreErr != nil {
+						walk.MsgBox(dlg, "Restore failed", restoreErr.Error(), walk.MsgBoxIconError)
+						return
+					}
+					refresh()
+					status.SetText(fmt.Sprintf("Restored %s %s. Replaced version backed up at %s", restored.Name, restored.Version, currentBackup))
+				}},
 				PushButton{AssignTo: &uninstallButton, Text: "Uninstall selected", OnClicked: func() {
 					index := list.CurrentIndex()
 					if index < 0 || index >= len(model.items) {
@@ -307,6 +393,8 @@ func showModManager(owner walk.Form, game *GameInfo) {
 					refresh()
 					status.SetText("Uninstalled safely. Backup: " + backup)
 				}},
+			}},
+			Composite{Layout: HBox{MarginsZero: true, Spacing: 7}, Children: []Widget{
 				PushButton{AssignTo: &packageButton, Text: "Build Mod ZIP…", OnClicked: func() { showPackageBuilder(dlg, game) }},
 				PushButton{AssignTo: &openButton, Text: "Open mods folder", OnClicked: func() { _ = openExplorer(filepath.Join(game.GameDirectory, "KeeperLoader", "mods")) }},
 				HSpacer{}, PushButton{AssignTo: &closeButton, Text: "Close", OnClicked: func() { dlg.Accept() }},
@@ -316,6 +404,8 @@ func showModManager(owner walk.Form, game *GameInfo) {
 	}
 	_, err := decl.Run(owner)
 	_ = installButton
+	_ = updateButton
+	_ = restoreButton
 	_ = uninstallButton
 	_ = packageButton
 	_ = openButton

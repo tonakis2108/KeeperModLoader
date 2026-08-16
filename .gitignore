@@ -1,5 +1,5 @@
 # Build outputs
-KeeperLoader-Manager.exe
+KeeperLoader-Manager*.exe
 *.zip
 dist/
 artifacts/

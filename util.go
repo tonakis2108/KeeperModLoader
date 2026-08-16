@@ -18,7 +18,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const loaderVersion = "0.4.1"
+const loaderVersion = "0.5.0"
 
 func fileExists(path string) bool {
 	info, err := os.Stat(path)

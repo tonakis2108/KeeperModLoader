@@ -32,7 +32,15 @@ type GameInfo struct {
 func (g *GameInfo) String() string {
 	status := "Available"
 	if loaderEnabled(g) {
-		status = "Enabled"
+		installed := installedLoaderVersion(g)
+		switch {
+		case installed == "":
+			status = "Enabled (version unknown)"
+		case installed == loaderVersion:
+			status = "Enabled " + installed
+		default:
+			status = "Update available " + installed + " → " + loaderVersion
+		}
 	}
 	return fmt.Sprintf("%s  |  %s %s  |  %s  |  %s", g.ProcessName, g.Backend, g.Architecture, status, g.GameDirectory)
 }

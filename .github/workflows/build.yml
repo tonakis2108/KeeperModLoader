@@ -25,7 +25,18 @@ jobs:
           cache: true
 
       - name: Verify source
-        run: go vet ./...
+        run: |
+          go test ./...
+          go vet ./...
+
+      - name: Verify version marker
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $source = Get-Content util.go -Raw
+          if ($source -notmatch ('const loaderVersion = "' + [regex]::Escape($version) + '"')) {
+            throw "VERSION does not match loaderVersion"
+          }
 
       - name: Build Windows GUI
         env:
@@ -46,6 +57,7 @@ jobs:
           name: KeeperLoader-Windows-x64
           path: |
             KeeperLoader-Manager.exe
+            VERSION
             README.md
             DEVELOPING_MODS.md
             LICENSE

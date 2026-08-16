@@ -184,7 +184,26 @@ func validateGameRecord(game *GameInfo) ([4]int, error) {
 	return version, nil
 }
 
+type modInstallOptions struct {
+	ExpectedID     string
+	CurrentVersion string
+	RequireNewer   bool
+}
+
 func installModPackage(game *GameInfo, zipPath string) (*InstalledMod, string, error) {
+	return installModPackageWithOptions(game, zipPath, modInstallOptions{})
+}
+
+func updateModPackage(game *GameInfo, current *InstalledMod, zipPath string) (*InstalledMod, string, error) {
+	if current == nil || !modIDPattern.MatchString(current.ID) {
+		return nil, "", errors.New("select a valid installed mod first")
+	}
+	return installModPackageWithOptions(game, zipPath, modInstallOptions{
+		ExpectedID: current.ID, CurrentVersion: current.Version, RequireNewer: true,
+	})
+}
+
+func installModPackageWithOptions(game *GameInfo, zipPath string, options modInstallOptions) (*InstalledMod, string, error) {
 	if err := assertGameStopped(game); err != nil {
 		return nil, "", err
 	}
@@ -225,6 +244,19 @@ func installModPackage(game *GameInfo, zipPath string) (*InstalledMod, string, e
 	}
 	if _, err = parseVersion(manifest.Version); err != nil {
 		return nil, "", errors.New("mod package rejected: manifest version is invalid")
+	}
+	if options.ExpectedID != "" && !strings.EqualFold(manifest.ID, options.ExpectedID) {
+		return nil, "", fmt.Errorf("mod update rejected: selected mod is %s but the package contains %s", options.ExpectedID, manifest.ID)
+	}
+	if options.RequireNewer {
+		currentVersion, currentErr := parseVersion(options.CurrentVersion)
+		newVersion, newErr := parseVersion(manifest.Version)
+		if currentErr != nil {
+			return nil, "", errors.New("mod update rejected: the installed version is unknown; use Install Mod ZIP for a deliberate replacement")
+		}
+		if newErr != nil || compareVersion(newVersion, currentVersion) <= 0 {
+			return nil, "", fmt.Errorf("mod update rejected: version %s must be newer than installed version %s", manifest.Version, options.CurrentVersion)
+		}
 	}
 	minimum, err := parseVersion(manifest.MinimumKeeperLoaderVersion)
 	if err != nil {
@@ -380,6 +412,8 @@ func installModPackage(game *GameInfo, zipPath string) (*InstalledMod, string, e
 		if err = os.Rename(target, backup); err != nil {
 			return nil, "", err
 		}
+		now := time.Now()
+		_ = os.Chtimes(backup, now, now)
 	}
 	if err = os.Rename(staging, target); err != nil {
 		if backup != "" && !dirExists(target) {
@@ -417,6 +451,65 @@ func uninstallMod(game *GameInfo, mod *InstalledMod) (string, error) {
 		_ = os.WriteFile(filepath.Join(backup, "keeperloader-uninstall.json"), append(data, '\n'), 0644)
 	}
 	return backup, nil
+}
+
+func restorePreviousMod(game *GameInfo, current *InstalledMod) (*InstalledMod, string, error) {
+	if err := assertGameStopped(game); err != nil {
+		return nil, "", err
+	}
+	if current == nil || !modIDPattern.MatchString(current.ID) || !dirExists(current.Path) {
+		return nil, "", errors.New("the selected mod is not installed")
+	}
+	loader := filepath.Join(game.GameDirectory, "KeeperLoader")
+	backupRoot := filepath.Join(loader, "backup", "mods")
+	entries, err := os.ReadDir(backupRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, "", errors.New("no previous version is available for this mod")
+		}
+		return nil, "", err
+	}
+	type candidate struct {
+		path     string
+		modified time.Time
+		manifest ModManifest
+	}
+	var candidates []candidate
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(backupRoot, entry.Name())
+		data, readErr := os.ReadFile(filepath.Join(path, "keepermod.json"))
+		if readErr != nil {
+			continue
+		}
+		var manifest ModManifest
+		if json.Unmarshal(data, &manifest) != nil || !strings.EqualFold(manifest.ID, current.ID) {
+			continue
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			continue
+		}
+		candidates = append(candidates, candidate{path: path, modified: info.ModTime(), manifest: manifest})
+	}
+	if len(candidates) == 0 {
+		return nil, "", errors.New("no previous version is available for this mod")
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].modified.After(candidates[j].modified) })
+	previous := candidates[0]
+	currentBackup := uniqueTimestampPath(backupRoot, current.ID+"-before-restore")
+	if err = os.Rename(current.Path, currentBackup); err != nil {
+		return nil, "", err
+	}
+	now := time.Now()
+	_ = os.Chtimes(currentBackup, now, now)
+	if err = os.Rename(previous.path, current.Path); err != nil {
+		_ = os.Rename(currentBackup, current.Path)
+		return nil, "", err
+	}
+	return &InstalledMod{ID: previous.manifest.ID, Name: previous.manifest.Name, Version: previous.manifest.Version, Path: current.Path}, currentBackup, nil
 }
 
 func createModPackage(sourceFolder, modID, modName, version string, supportedGames []string, minimumVersion, outputZip string) error {

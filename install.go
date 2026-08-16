@@ -48,6 +48,64 @@ func loaderEnabled(game *GameInfo) bool {
 		fileExists(filepath.Join(game.GameDirectory, "KeeperLoader", "core", "KeeperLoader.API.dll"))
 }
 
+func installedLoaderVersion(game *GameInfo) string {
+	data, err := os.ReadFile(filepath.Join(game.GameDirectory, "KeeperLoader", "state", "game.json"))
+	if err != nil {
+		return ""
+	}
+	var record struct {
+		KeeperLoaderVersion string `json:"keeperLoaderVersion"`
+	}
+	if json.Unmarshal(data, &record) != nil {
+		return ""
+	}
+	return strings.TrimSpace(record.KeeperLoaderVersion)
+}
+
+func activateCoreUpdate(loader string, builtFiles [][2]string) (string, func(), error) {
+	staging, err := os.MkdirTemp(loader, ".core-update-")
+	if err != nil {
+		return "", nil, err
+	}
+	stagingActive := true
+	defer func() {
+		if stagingActive {
+			_ = os.RemoveAll(staging)
+		}
+	}()
+	for _, pair := range builtFiles {
+		if err = copyFile(pair[0], filepath.Join(staging, filepath.Base(pair[1]))); err != nil {
+			return "", nil, err
+		}
+	}
+	core := filepath.Join(loader, "core")
+	backup := ""
+	if dirExists(core) {
+		backupRoot := filepath.Join(loader, "backup", "core")
+		if err = os.MkdirAll(backupRoot, 0755); err != nil {
+			return "", nil, err
+		}
+		backup = uniqueTimestampPath(backupRoot, "core")
+		if err = os.Rename(core, backup); err != nil {
+			return "", nil, err
+		}
+	}
+	if err = os.Rename(staging, core); err != nil {
+		if backup != "" {
+			_ = os.Rename(backup, core)
+		}
+		return "", nil, err
+	}
+	stagingActive = false
+	rollback := func() {
+		_ = os.RemoveAll(core)
+		if backup != "" {
+			_ = os.Rename(backup, core)
+		}
+	}
+	return backup, rollback, nil
+}
+
 func extractEmbeddedSources(destination string) (map[string]string, error) {
 	paths := []string{
 		"src/API/KeeperLoaderApi.cs",
@@ -232,17 +290,26 @@ func enableLoader(game *GameInfo) (string, error) {
 	}
 
 	loader := filepath.Join(game.GameDirectory, "KeeperLoader")
-	core := filepath.Join(loader, "core")
-	for _, directory := range []string{core, filepath.Join(loader, "mods"), filepath.Join(loader, "config"), filepath.Join(loader, "logs"), filepath.Join(loader, "state")} {
+	for _, directory := range []string{loader, filepath.Join(loader, "mods"), filepath.Join(loader, "config"), filepath.Join(loader, "logs"), filepath.Join(loader, "state")} {
 		if err = os.MkdirAll(directory, 0755); err != nil {
 			return "", err
 		}
 	}
-	for _, pair := range [][2]string{{apiBuild, filepath.Join(core, "KeeperLoader.API.dll")}, {bootstrapBuild, filepath.Join(core, "KeeperLoader.Bootstrap.dll")}, {runtimeBuild, filepath.Join(core, "KeeperLoader.Runtime.dll")}} {
-		if err = copyFile(pair[0], pair[1]); err != nil {
-			return "", err
-		}
+	core := filepath.Join(loader, "core")
+	_, rollbackCore, err := activateCoreUpdate(loader, [][2]string{
+		{apiBuild, filepath.Join(core, "KeeperLoader.API.dll")},
+		{bootstrapBuild, filepath.Join(core, "KeeperLoader.Bootstrap.dll")},
+		{runtimeBuild, filepath.Join(core, "KeeperLoader.Runtime.dll")},
+	})
+	if err != nil {
+		return "", err
 	}
+	coreCommitted := false
+	defer func() {
+		if !coreCommitted {
+			rollbackCore()
+		}
+	}()
 
 	backupMarker := filepath.Join(loader, "state", "last-backup.txt")
 	currentConfig := filepath.Join(game.GameDirectory, "doorstop_config.ini")
@@ -289,6 +356,7 @@ func enableLoader(game *GameInfo) (string, error) {
 	if err = writeAtomic(filepath.Join(loader, "state", "game.json"), append(jsonData, '\n'), 0644); err != nil {
 		return "", err
 	}
+	coreCommitted = true
 	return backup, nil
 }
 
