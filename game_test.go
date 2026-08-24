@@ -33,6 +33,9 @@ func TestSteamManifestLookupAndRunURI(t *testing.T) {
 	if _, err = steamRunURI("599140&unsafe=true"); err == nil {
 		t.Fatal("unsafe Steam App ID was accepted")
 	}
+	if appID := steamAppIDForGameDirectoryFromRoots(filepath.Join(root, "steamapps", "common", "Missing Game"), []string{root}); appID != "" {
+		t.Fatalf("unexpected Steam App ID for an installation without a manifest: %q", appID)
+	}
 }
 
 func TestMergeGamesKeepsSteamMetadata(t *testing.T) {
