@@ -8,6 +8,7 @@ artifacts/
 *.test
 *.out
 coverage.*
+rsrc.syso
 
 # Editors and operating systems
 .idea/

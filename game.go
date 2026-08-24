@@ -21,6 +21,7 @@ type GameInfo struct {
 	ExecutableName   string `json:"executable"`
 	ProcessName      string `json:"-"`
 	GameID           string `json:"gameId"`
+	SteamAppID       string `json:"steamAppId,omitempty"`
 	DataDirectory    string `json:"dataDirectory"`
 	ManagedDirectory string `json:"managedDirectory"`
 	Backend          string `json:"backend"`
@@ -42,7 +43,11 @@ func (g *GameInfo) String() string {
 			status = "Update available " + installed + " → " + loaderVersion
 		}
 	}
-	return fmt.Sprintf("%s  |  %s %s  |  %s  |  %s", g.ProcessName, g.Backend, g.Architecture, status, g.GameDirectory)
+	steam := ""
+	if g.SteamAppID != "" {
+		steam = "  |  Steam " + g.SteamAppID
+	}
+	return fmt.Sprintf("%s  |  %s %s  |  %s%s  |  %s", g.ProcessName, g.Backend, g.Architecture, status, steam, g.GameDirectory)
 }
 
 func normalizeGameID(name string) string {
@@ -155,6 +160,84 @@ func detectUnityGame(path string) (*GameInfo, error) {
 }
 
 var steamPathPattern = regexp.MustCompile(`(?i)^\s*"path"\s*"([^"]+)"`)
+var steamManifestValuePattern = regexp.MustCompile(`^\s*"([^"]+)"\s*"([^"]*)"`)
+var steamAppIDPattern = regexp.MustCompile(`^[1-9][0-9]{0,11}$`)
+
+type steamAppManifest struct {
+	AppID            string
+	InstallDirectory string
+}
+
+func readSteamAppManifest(path string) (steamAppManifest, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return steamAppManifest{}, err
+	}
+	defer file.Close()
+	manifest := steamAppManifest{}
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		match := steamManifestValuePattern.FindStringSubmatch(scanner.Text())
+		if len(match) != 3 {
+			continue
+		}
+		switch strings.ToLower(match[1]) {
+		case "appid":
+			manifest.AppID = strings.TrimSpace(match[2])
+		case "installdir":
+			manifest.InstallDirectory = strings.TrimSpace(match[2])
+		}
+	}
+	if err = scanner.Err(); err != nil {
+		return steamAppManifest{}, err
+	}
+	if !steamAppIDPattern.MatchString(manifest.AppID) || manifest.InstallDirectory == "" {
+		return steamAppManifest{}, errors.New("Steam app manifest is missing a valid app ID or install directory")
+	}
+	return manifest, nil
+}
+
+func steamInstallations(root string) map[string]string {
+	result := map[string]string{}
+	steamApps := filepath.Join(root, "steamapps")
+	common := filepath.Join(steamApps, "common")
+	manifestPaths, _ := filepath.Glob(filepath.Join(steamApps, "appmanifest_*.acf"))
+	for _, manifestPath := range manifestPaths {
+		manifest, err := readSteamAppManifest(manifestPath)
+		if err != nil {
+			continue
+		}
+		installPath := filepath.Clean(filepath.Join(common, filepath.FromSlash(manifest.InstallDirectory)))
+		relative, relErr := filepath.Rel(common, installPath)
+		if relErr != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
+			continue
+		}
+		result[strings.ToLower(installPath)] = manifest.AppID
+	}
+	return result
+}
+
+func steamAppIDForGameDirectoryFromRoots(gameDirectory string, roots []string) string {
+	target := strings.ToLower(filepath.Clean(gameDirectory))
+	for _, root := range roots {
+		if appID := steamInstallations(root)[target]; appID != "" {
+			return appID
+		}
+	}
+	return ""
+}
+
+func steamAppIDForGameDirectory(gameDirectory string) string {
+	return steamAppIDForGameDirectoryFromRoots(gameDirectory, steamRoots())
+}
+
+func steamRunURI(appID string) (string, error) {
+	appID = strings.TrimSpace(appID)
+	if !steamAppIDPattern.MatchString(appID) {
+		return "", errors.New("a valid Steam App ID was not found for this game")
+	}
+	return "steam://run/" + appID, nil
+}
 
 func steamRoots() []string {
 	var roots []string
@@ -203,6 +286,7 @@ func scanSteamGames() ([]*GameInfo, error) {
 	seen := map[string]bool{}
 	var games []*GameInfo
 	for _, root := range steamRoots() {
+		installations := steamInstallations(root)
 		common := filepath.Join(root, "steamapps", "common")
 		entries, err := os.ReadDir(common)
 		if err != nil {
@@ -219,6 +303,7 @@ func scanSteamGames() ([]*GameInfo, error) {
 			key := strings.ToLower(game.GameDirectory)
 			if !seen[key] {
 				seen[key] = true
+				game.SteamAppID = installations[key]
 				games = append(games, game)
 			}
 		}

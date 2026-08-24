@@ -18,7 +18,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const loaderVersion = "0.6.0"
+const loaderVersion = "0.6.1"
 
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
@@ -197,6 +197,27 @@ func openExplorer(path string) error {
 		return fmt.Errorf("folder does not exist: %s", path)
 	}
 	return exec.Command("explorer.exe", path).Start()
+}
+
+func launchGameThroughSteam(game *GameInfo) (string, error) {
+	if game == nil {
+		return "", errors.New("select a game first")
+	}
+	if game.SteamAppID == "" {
+		game.SteamAppID = steamAppIDForGameDirectory(game.GameDirectory)
+	}
+	uri, err := steamRunURI(game.SteamAppID)
+	if err != nil {
+		return "", err
+	}
+	target, err := windows.UTF16PtrFromString(uri)
+	if err != nil {
+		return "", fmt.Errorf("could not prepare the Steam launch request: %w", err)
+	}
+	if err = windows.ShellExecute(windows.Handle(0), nil, target, nil, nil, 1); err != nil {
+		return "", fmt.Errorf("Steam could not launch the selected game: %w", err)
+	}
+	return uri, nil
 }
 
 func persistentDataLocation(game *GameInfo) (string, string, error) {

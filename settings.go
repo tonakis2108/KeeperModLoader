@@ -39,6 +39,7 @@ func loadRememberedGames() ([]*GameInfo, error) {
 		if detectErr != nil || !game.Supported {
 			continue
 		}
+		game.SteamAppID = steamAppIDForGameDirectory(game.GameDirectory)
 		key := strings.ToLower(game.GameDirectory)
 		if !seen[key] {
 			seen[key] = true

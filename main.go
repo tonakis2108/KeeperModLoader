@@ -55,7 +55,7 @@ func main() {
 		return
 	}
 	app := &application{model: &gameListModel{}}
-	var scanButton, addButton, managerUpdateButton, enableButton, disableButton, manageButton, savesButton *walk.PushButton
+	var scanButton, addButton, managerUpdateButton, enableButton, disableButton, manageButton, savesButton, launchButton *walk.PushButton
 	window := MainWindow{
 		AssignTo: &app.mw,
 		Title:    "KeeperLoader Universal Manager " + loaderVersion,
@@ -74,6 +74,7 @@ func main() {
 			}},
 			Composite{Layout: HBox{MarginsZero: true, Spacing: 7}, Children: []Widget{
 				HSpacer{},
+				PushButton{AssignTo: &launchButton, Text: "Launch through Steam", OnClicked: func() { app.launchSelected() }},
 				PushButton{AssignTo: &enableButton, Text: "Enable / update selected", OnClicked: func() { app.enableSelected() }},
 				PushButton{AssignTo: &disableButton, Text: "Remove selected", OnClicked: func() { app.disableSelected() }},
 				PushButton{AssignTo: &manageButton, Text: "Manage mods…", OnClicked: func() { app.manageSelected() }},
@@ -88,7 +89,7 @@ func main() {
 		walk.MsgBox(nil, "KeeperLoader", err.Error(), walk.MsgBoxIconError)
 		return
 	}
-	app.buttons = []*walk.PushButton{scanButton, addButton, managerUpdateButton, enableButton, disableButton, manageButton, savesButton}
+	app.buttons = []*walk.PushButton{scanButton, addButton, managerUpdateButton, launchButton, enableButton, disableButton, manageButton, savesButton}
 	if remembered, rememberErr := loadRememberedGames(); rememberErr != nil {
 		app.appendLog("Could not load remembered game locations: " + rememberErr.Error())
 	} else {
@@ -130,15 +131,19 @@ func (app *application) selectedGames(requireOne bool) []*GameInfo {
 }
 
 func mergeGames(existing, added []*GameInfo) []*GameInfo {
-	seen := map[string]bool{}
+	indexes := map[string]int{}
 	var result []*GameInfo
 	for _, list := range [][]*GameInfo{existing, added} {
 		for _, game := range list {
 			key := strings.ToLower(game.GameDirectory)
-			if !seen[key] {
-				seen[key] = true
-				result = append(result, game)
+			if index, exists := indexes[key]; exists {
+				if result[index].SteamAppID == "" && game.SteamAppID != "" {
+					result[index].SteamAppID = game.SteamAppID
+				}
+				continue
 			}
+			indexes[key] = len(result)
+			result = append(result, game)
 		}
 	}
 	return result
@@ -183,11 +188,31 @@ func (app *application) addGame() {
 		walk.MsgBox(app.mw, "Unsupported Unity game", game.Reason, walk.MsgBoxIconWarning)
 		return
 	}
+	game.SteamAppID = steamAppIDForGameDirectory(game.GameDirectory)
 	app.model.reset(mergeGames(app.model.items, []*GameInfo{game}))
 	if err = saveRememberedGames(app.model.items); err != nil {
 		app.appendLog("Could not remember game locations: " + err.Error())
 	}
 	app.appendLog("Added " + game.ProcessName + ".")
+}
+
+func (app *application) launchSelected() {
+	games := app.selectedGames(true)
+	if len(games) != 1 {
+		return
+	}
+	game := games[0]
+	if running, err := isProcessRunning(game.ExecutableName); err == nil && running {
+		walk.MsgBox(app.mw, "Game already running", game.ProcessName+" is already running.", walk.MsgBoxIconInformation)
+		return
+	}
+	uri, err := launchGameThroughSteam(game)
+	if err != nil {
+		walk.MsgBox(app.mw, "Steam launch unavailable", err.Error()+"\r\n\r\nUse Scan Steam to refresh Steam metadata. Games installed outside Steam cannot use this action.", walk.MsgBoxIconWarning)
+		return
+	}
+	app.model.PublishItemsReset()
+	app.appendLog("Requested Steam launch for " + game.ProcessName + " (App ID " + game.SteamAppID + "). " + uri)
 }
 
 func (app *application) enableSelected() {

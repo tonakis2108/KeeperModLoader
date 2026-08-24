@@ -58,6 +58,9 @@ jobs:
           & $csc /nologo /target:library /out:build-csharp\KeeperLoader.Runtime.dll /reference:build-csharp\KeeperLoader.API.dll $runtimeSources src\Runtime.Tests\UnityEngineStubs.cs
           if ($LASTEXITCODE -ne 0) { throw "KeeperLoader runtime compilation failed" }
 
+      - name: Generate Windows resource
+        run: go generate ./...
+
       - name: Build Windows GUI
         env:
           CGO_ENABLED: "0"
