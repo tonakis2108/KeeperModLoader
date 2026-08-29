@@ -143,7 +143,7 @@ jobs:
 
           ### Installation
 
-          1. Download `$env:ARCHIVE`.
+          1. Download **$env:ARCHIVE**.
           2. Extract it to a permanent folder outside the game installation.
           3. Run `KeeperLoader-Manager.exe`.
           4. Select **Scan Steam**.
