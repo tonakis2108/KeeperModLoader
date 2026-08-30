@@ -22,14 +22,14 @@
     "Comments": "Open-source KeeperLoader manager for Graveyard Keeper native mods.",
     "CompanyName": "tonakis2108",
     "FileDescription": "KeeperLoader Manager for Graveyard Keeper",
-    "FileVersion": "0.7.3.0",
+    "FileVersion": "0.7.4.0",
     "InternalName": "KeeperLoader-Manager",
     "LegalCopyright": "Copyright 2026 tonakis2108. Licensed under LGPL-2.1-or-later.",
     "LegalTrademarks": "",
     "OriginalFilename": "KeeperLoader-Manager.exe",
     "PrivateBuild": "",
     "ProductName": "KeeperLoader",
-    "ProductVersion": "0.7.3",
+    "ProductVersion": "0.7.4",
     "SpecialBuild": ""
   },
   "VarFileInfo": {

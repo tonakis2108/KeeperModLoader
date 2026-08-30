@@ -116,6 +116,10 @@ func runtimePayloadRoot() (string, error) {
 }
 
 func validateRuntimePayload(root string) error {
+	return validateRuntimePayloadForVersion(root, loaderVersion)
+}
+
+func validateRuntimePayloadForVersion(root, expectedVersion string) error {
 	checksumPath := filepath.Join(root, "SHA256SUMS.txt")
 	data, err := os.ReadFile(checksumPath)
 	if err != nil {
@@ -160,8 +164,8 @@ func validateRuntimePayload(root string) error {
 		Architecture        string `json:"architecture"`
 		KeeperLoaderVersion string `json:"keeperLoaderVersion"`
 	}
-	if json.Unmarshal(gameRecord, &record) != nil || record.GameID != graveyardKeeperGameID || record.Architecture != "x64" || record.KeeperLoaderVersion != loaderVersion {
-		return errors.New("runtime payload metadata does not match this KeeperLoader Manager version")
+	if json.Unmarshal(gameRecord, &record) != nil || record.GameID != graveyardKeeperGameID || record.Architecture != "x64" || record.KeeperLoaderVersion != expectedVersion {
+		return fmt.Errorf("runtime payload metadata does not match expected KeeperLoader version %s", expectedVersion)
 	}
 	return nil
 }

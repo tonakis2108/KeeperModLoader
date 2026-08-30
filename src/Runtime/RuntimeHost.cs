@@ -59,7 +59,7 @@ namespace KeeperLoader.Runtime
             // Unity calls Start on the next normal lifecycle pass. This keeps
             // mod startup deferred until the engine is ready without relying
             // on SceneManager events that older Graveyard Keeper builds lack.
-            _log.Info("KeeperLoader runtime 0.7.3 initialized for " +
+            _log.Info("KeeperLoader runtime 0.7.4 initialized for " +
                 Environment.GetEnvironmentVariable("KEEPERLOADER_GAME_ID") +
                 (_safeMode ? " in SAFE MODE." : "."));
             _catalog = new ModCatalog(_loaderDirectory, _log);
