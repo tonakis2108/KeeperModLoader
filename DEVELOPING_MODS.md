@@ -62,7 +62,7 @@ Early KeeperLoader packages could contain C# source and a `build` section instea
 
 The converter validates the old manifest and file hashes, compiles against the checked-in KeeperLoader API and the selected game's Unity assemblies, adds the output DLL to the verified file list, and writes a new installable ZIP. Compilation happens only on the publisher's build computer. Players keep using **Update selected from ZIP...** normally, including when updating an installed mod that was originally built by an older KeeperLoader version.
 
-The converted package intentionally retains the legacy source and `build` metadata for transparency. Current managers accept that transitional format only when the exact output DLL named by `build.output` is present and SHA-256 hashed in the manifest.
+The converted package retains the legacy source for transparency but removes the obsolete `build` instruction after adding the compiled DLL. Its output therefore installs through the already released v0.7.2 manager. Future managers also accept independently produced transitional packages that retain `build` metadata, but only when the exact output DLL named by `build.output` is present and SHA-256 hashed in the manifest.
 
 For the dedicated **Update selected from ZIP...** workflow, keep the mod ID unchanged and increase the numeric version. The manager rejects ID changes, equal versions, and downgrades. Mod settings should remain in `KeeperContext.ConfigDirectory` and persistent data in `KeeperContext.StateDirectory`; those locations are preserved across updates and rollback.
 

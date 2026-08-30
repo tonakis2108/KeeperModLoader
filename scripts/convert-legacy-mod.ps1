@@ -137,6 +137,10 @@ try {
     })
     $newFiles += [pscustomobject]@{ path = $outputRelative; sha256 = $outputDigest }
     $manifest.files = @($newFiles | Sort-Object { ([string]$_.path).ToLowerInvariant() })
+    # The DLL is now the distributable payload. Removing the obsolete instruction
+    # also makes the converted ZIP installable by the already released v0.7.2
+    # manager, which deliberately rejects any package asking it to compile.
+    $manifest.PSObject.Properties.Remove('build')
     $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
     $parent = Split-Path -Parent $outputPath
