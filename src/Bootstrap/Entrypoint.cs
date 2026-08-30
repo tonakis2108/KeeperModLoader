@@ -30,7 +30,7 @@ namespace Doorstop
                 Directory.CreateDirectory(Path.Combine(_loaderDirectory, "config"));
                 _logPath = Path.Combine(_loaderDirectory, "logs", "latest.log");
                 RotateLog();
-                Log("KeeperLoader bootstrap 0.7.4 starting.");
+                Log("KeeperLoader bootstrap 0.7.5 starting.");
                 Log("Process path: " + processPath);
 
                 PrepareEnvironment();

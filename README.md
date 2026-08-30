@@ -1,12 +1,12 @@
-# KeeperLoader 0.7.4 Alpha
+# KeeperLoader 0.7.5 Alpha
 
-KeeperLoader is a native managed mod loader for the Windows Steam version of **Graveyard Keeper**. Version 0.7.4 includes the older-Unity startup fix and corrects manager updates so the staged runtime is validated against the incoming package version instead of the version of the manager currently running.
+KeeperLoader is a native managed mod loader for the Windows Steam version of **Graveyard Keeper**. Version 0.7.5 fixes the precompiled runtime's Unity member contract and defers host creation until Unity has entered its frame loop. This restores native mod loading without changing the KeeperLoader mod API or package format.
 
 ## Choose a download
 
 ### Clean Nexus/manual runtime
 
-`KeeperLoader-GraveyardKeeper-Runtime-v0.7.4.zip`
+`KeeperLoader-GraveyardKeeper-Runtime-v0.7.5.zip`
 
 - Precompiled specifically for Graveyard Keeper's Unity Mono runtime.
 - Contains no `.exe`, downloader, updater, compiler, script, or external-plugin loader.
@@ -16,7 +16,7 @@ KeeperLoader is a native managed mod loader for the Windows Steam version of **G
 
 ### Easiest installation: optional manager
 
-`KeeperLoader-Manager-Windows-x64-v0.7.4.zip`
+`KeeperLoader-Manager-Windows-x64-v0.7.5.zip`
 
 The optional manager keeps the convenient workflow from previous releases:
 
@@ -33,7 +33,7 @@ The optional manager keeps the convenient workflow from previous releases:
 
 The complete manager ZIP must be extracted before it is run because the verified `runtime` directory is part of the installation payload. The manager does not download UnityDoorstop and does not compile KeeperLoader on the player's computer. It remains a separate download because it is a Windows executable with legitimate file-management, process-checking, and self-update behavior. Those capabilities are not present in the Nexus runtime ZIP.
 
-**One-time update note:** Managers v0.7.3 and older incorrectly compare incoming runtime metadata with their own older version and therefore reject a normal version upgrade. To install v0.7.4, close the old manager, extract the complete v0.7.4 ZIP into a new folder, and run its executable directly. After v0.7.4 is running, future manager versions can again be installed through **Install manager update...**.
+**One-time update note for old managers:** Managers v0.7.3 and older incorrectly compare incoming runtime metadata with their own older version and therefore reject a normal version upgrade. Close those managers, extract the complete v0.7.5 ZIP into a new folder, and run its executable directly. Managers v0.7.4 and newer can install this and future versions through **Install manager update...**.
 
 ## Requirements
 
@@ -42,11 +42,11 @@ The complete manager ZIP must be extracted before it is run because the verified
 - Windows 10 or Windows 11.
 - The game must be closed during installation, updates, or removal.
 
-KeeperLoader 0.7.4 intentionally does not target other games, IL2CPP builds, macOS, Linux, consoles, ARM64, external plugin formats, or third-party runtime emulation.
+KeeperLoader 0.7.5 intentionally does not target other games, IL2CPP builds, macOS, Linux, consoles, ARM64, external plugin formats, or third-party runtime emulation.
 
 ## Easiest setup with the manager
 
-1. Download `KeeperLoader-Manager-Windows-x64-v0.7.4.zip` from the official GitHub release.
+1. Download `KeeperLoader-Manager-Windows-x64-v0.7.5.zip` from the official GitHub release.
 2. Extract the complete ZIP into a permanent folder.
 3. Run `KeeperLoader-Manager.exe`. Steam scanning starts automatically and selects Graveyard Keeper when it is the only result.
 4. Select **Install / update KeeperLoader**.
@@ -96,7 +96,7 @@ With the optional manager:
 
 ## Installing and updating native mods
 
-Existing compiled native KeeperLoader mods do not need source or API changes for 0.7.4. The public `KeeperLoader.API` source is byte-for-byte unchanged from 0.6.2, and CI rejects the release if that compatibility boundary changes. Legacy ZIPs that contain C# source but no DLL must be converted once on the publisher/build side; KeeperLoader deliberately does not invoke a compiler on a player's PC. The repository converter produces a precompiled package compatible with v0.7.2 and newer managers. Transitional ZIPs that retain legacy `build` metadata are accepted only when the declared, hashed output DLL is included.
+Existing compiled native KeeperLoader mods do not need source or API changes for 0.7.5. The public `KeeperLoader.API` source is byte-for-byte unchanged from 0.6.2, and CI rejects the release if that compatibility boundary changes. Legacy ZIPs that contain C# source but no DLL must be converted once on the publisher/build side; KeeperLoader deliberately does not invoke a compiler on a player's PC. The repository converter produces a precompiled package compatible with v0.7.2 and newer managers. Transitional ZIPs that retain legacy `build` metadata are accepted only when the declared, hashed output DLL is included.
 
 Using the optional manager:
 
