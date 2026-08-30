@@ -44,19 +44,3 @@ namespace UnityEngine
         public static int width { get { return 1920; } }
     }
 }
-
-namespace UnityEngine.SceneManagement
-{
-    public struct Scene
-    {
-        public string name { get { return ""; } }
-    }
-
-    public enum LoadSceneMode { Single, Additive }
-
-    public static class SceneManager
-    {
-        public static event Action<Scene, LoadSceneMode> sceneLoaded;
-        public static Scene GetActiveScene() { return new Scene(); }
-    }
-}

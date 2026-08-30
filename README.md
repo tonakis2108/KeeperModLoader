@@ -1,12 +1,12 @@
-# KeeperLoader 0.7.2 Alpha
+# KeeperLoader 0.7.3 Alpha
 
-KeeperLoader is a native managed mod loader for the Windows Steam version of **Graveyard Keeper**. Version 0.7.2 keeps the clean executable-free Nexus runtime and fully offline manager, and fixes the Windows game-selection state so a visibly highlighted Graveyard Keeper installation is accepted by every action.
+KeeperLoader is a native managed mod loader for the Windows Steam version of **Graveyard Keeper**. Version 0.7.3 keeps the clean executable-free runtime and fully offline manager, and removes the runtime's hard dependency on newer Unity scene APIs so mods load on Graveyard Keeper's older Unity Mono build.
 
 ## Choose a download
 
 ### Clean Nexus/manual runtime
 
-`KeeperLoader-GraveyardKeeper-Runtime-v0.7.2.zip`
+`KeeperLoader-GraveyardKeeper-Runtime-v0.7.3.zip`
 
 - Precompiled specifically for Graveyard Keeper's Unity Mono runtime.
 - Contains no `.exe`, downloader, updater, compiler, script, or external-plugin loader.
@@ -16,7 +16,7 @@ KeeperLoader is a native managed mod loader for the Windows Steam version of **G
 
 ### Easiest installation: optional manager
 
-`KeeperLoader-Manager-Windows-x64-v0.7.2.zip`
+`KeeperLoader-Manager-Windows-x64-v0.7.3.zip`
 
 The optional manager keeps the convenient workflow from previous releases:
 
@@ -40,11 +40,11 @@ The complete manager ZIP must be extracted before it is run because the verified
 - Windows 10 or Windows 11.
 - The game must be closed during installation, updates, or removal.
 
-KeeperLoader 0.7.2 intentionally does not target other games, IL2CPP builds, macOS, Linux, consoles, ARM64, external plugin formats, or third-party runtime emulation.
+KeeperLoader 0.7.3 intentionally does not target other games, IL2CPP builds, macOS, Linux, consoles, ARM64, external plugin formats, or third-party runtime emulation.
 
 ## Easiest setup with the manager
 
-1. Download `KeeperLoader-Manager-Windows-x64-v0.7.2.zip` from the official GitHub release.
+1. Download `KeeperLoader-Manager-Windows-x64-v0.7.3.zip` from the official GitHub release.
 2. Extract the complete ZIP into a permanent folder.
 3. Run `KeeperLoader-Manager.exe`. Steam scanning starts automatically and selects Graveyard Keeper when it is the only result.
 4. Select **Install / update KeeperLoader**.
@@ -94,7 +94,7 @@ With the optional manager:
 
 ## Installing and updating native mods
 
-Existing compiled native KeeperLoader mods do not need source or API changes for 0.7.2. The public `KeeperLoader.API` source is byte-for-byte unchanged from 0.6.2, and CI rejects the release if that compatibility boundary changes. Legacy ZIPs that contain C# source but no DLL must be converted once on the publisher/build side; KeeperLoader deliberately does not invoke a compiler on a player's PC. The repository converter produces a precompiled package compatible with the released v0.7.2 manager. Future managers also accept a transitional ZIP that retains legacy `build` metadata when the declared, hashed output DLL is included.
+Existing compiled native KeeperLoader mods do not need source or API changes for 0.7.3. The public `KeeperLoader.API` source is byte-for-byte unchanged from 0.6.2, and CI rejects the release if that compatibility boundary changes. Legacy ZIPs that contain C# source but no DLL must be converted once on the publisher/build side; KeeperLoader deliberately does not invoke a compiler on a player's PC. The repository converter produces a precompiled package compatible with v0.7.2 and newer managers. Transitional ZIPs that retain legacy `build` metadata are accepted only when the declared, hashed output DLL is included.
 
 Using the optional manager:
 
