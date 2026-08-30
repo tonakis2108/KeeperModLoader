@@ -39,7 +39,7 @@ namespace KeeperLoader.Runtime
                 if (entryMode.Equals("external-unity-plugin", StringComparison.OrdinalIgnoreCase))
                 {
                     _coreLog.Warning("Skipped inactive legacy external package '" + name +
-                        "'. External plugin support was removed in KeeperLoader 0.6.2; uninstall it through the manager.");
+                        "'. External plugin support is not available; uninstall it through the manager.");
                     continue;
                 }
                 if (!entryMode.Equals("native", StringComparison.OrdinalIgnoreCase))

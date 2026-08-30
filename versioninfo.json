@@ -2,14 +2,14 @@
   "FixedFileInfo": {
     "FileVersion": {
       "Major": 0,
-      "Minor": 6,
-      "Patch": 2,
+      "Minor": 7,
+      "Patch": 0,
       "Build": 0
     },
     "ProductVersion": {
       "Major": 0,
-      "Minor": 6,
-      "Patch": 2,
+      "Minor": 7,
+      "Patch": 0,
       "Build": 0
     },
     "FileFlagsMask": "3f",
@@ -19,17 +19,17 @@
     "FileSubType": "00"
   },
   "StringFileInfo": {
-    "Comments": "Open-source manager for KeeperLoader-compatible Unity Mono game mods.",
+    "Comments": "Open-source KeeperLoader manager for Graveyard Keeper native mods.",
     "CompanyName": "tonakis2108",
-    "FileDescription": "KeeperLoader Universal Manager",
-    "FileVersion": "0.6.2.0",
+    "FileDescription": "KeeperLoader Manager for Graveyard Keeper",
+    "FileVersion": "0.7.0.0",
     "InternalName": "KeeperLoader-Manager",
     "LegalCopyright": "Copyright 2026 tonakis2108. Licensed under LGPL-2.1-or-later.",
     "LegalTrademarks": "",
     "OriginalFilename": "KeeperLoader-Manager.exe",
     "PrivateBuild": "",
     "ProductName": "KeeperLoader",
-    "ProductVersion": "0.6.2",
+    "ProductVersion": "0.7.0",
     "SpecialBuild": ""
   },
   "VarFileInfo": {

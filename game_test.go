@@ -47,3 +47,12 @@ func TestMergeGamesKeepsSteamMetadata(t *testing.T) {
 		t.Fatalf("Steam metadata was not merged: %#v", merged)
 	}
 }
+
+func TestGraveyardKeeperIdentityIsPinned(t *testing.T) {
+	if graveyardKeeperGameID != "graveyard-keeper" {
+		t.Fatalf("unexpected game ID %q", graveyardKeeperGameID)
+	}
+	if graveyardKeeperSteamAppID != "599140" {
+		t.Fatalf("unexpected Steam App ID %q", graveyardKeeperSteamAppID)
+	}
+}

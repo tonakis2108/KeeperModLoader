@@ -36,7 +36,7 @@ func loadRememberedGames() ([]*GameInfo, error) {
 	seen := map[string]bool{}
 	for _, directory := range settings.GameDirectories {
 		game, detectErr := detectUnityGame(directory)
-		if detectErr != nil || !game.Supported {
+		if detectErr != nil || !game.Supported || game.GameID != graveyardKeeperGameID {
 			continue
 		}
 		game.SteamAppID = steamAppIDForGameDirectory(game.GameDirectory)
@@ -56,7 +56,7 @@ func saveRememberedGames(games []*GameInfo) error {
 	seen := map[string]bool{}
 	settings := managerSettings{}
 	for _, game := range games {
-		if game == nil || strings.TrimSpace(game.GameDirectory) == "" {
+		if game == nil || game.GameID != graveyardKeeperGameID || strings.TrimSpace(game.GameDirectory) == "" {
 			continue
 		}
 		clean := filepath.Clean(game.GameDirectory)

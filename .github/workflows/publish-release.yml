@@ -2,10 +2,6 @@ name: Publish KeeperLoader Release
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/publish-release.yml
 
 permissions:
   contents: write
@@ -29,138 +25,95 @@ jobs:
           go test ./...
           go vet ./...
 
-      - name: Verify embedded C# runtime
+      - name: Build executable-free runtime
+        shell: pwsh
+        run: ./scripts/build-runtime.ps1
+
+      - name: Generate resource and build optional manager
         shell: pwsh
         run: |
-          $framework = Get-ChildItem "$env:WINDIR\Microsoft.NET\Framework64" -Directory |
-            Sort-Object Name -Descending |
-            Where-Object { Test-Path (Join-Path $_.FullName "csc.exe") } |
-            Select-Object -First 1
-          if (-not $framework) {
-            throw "A .NET Framework C# compiler was not found"
-          }
-          $csc = Join-Path $framework.FullName "csc.exe"
-          New-Item -ItemType Directory -Force build-csharp | Out-Null
-          & $csc /nologo /target:library /out:build-csharp\KeeperLoader.API.dll src\API\KeeperLoaderApi.cs
-          if ($LASTEXITCODE -ne 0) { throw "KeeperLoader API compilation failed" }
-          & $csc /nologo /target:library /out:build-csharp\KeeperLoader.Bootstrap.dll src\Bootstrap\Entrypoint.cs
-          if ($LASTEXITCODE -ne 0) { throw "KeeperLoader bootstrap compilation failed" }
-          $runtimeSources = Get-ChildItem src\Runtime\*.cs | ForEach-Object FullName
-          & $csc /nologo /target:library /out:build-csharp\KeeperLoader.Runtime.dll /reference:build-csharp\KeeperLoader.API.dll $runtimeSources src\Runtime.Tests\UnityEngineStubs.cs
-          if ($LASTEXITCODE -ne 0) { throw "KeeperLoader runtime compilation failed" }
+          go generate ./...
+          $env:CGO_ENABLED = "0"
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          go build -buildvcs=false -trimpath -ldflags="-H=windowsgui" -o KeeperLoader-Manager.exe .
+          if ($LASTEXITCODE -ne 0) { throw "Manager build failed" }
+          ./scripts/package-manager.ps1
 
-      - name: Generate Windows resource
-        run: go generate ./...
-
-      - name: Build Windows manager
-        env:
-          CGO_ENABLED: "0"
-          GOOS: windows
-          GOARCH: amd64
-        run: go build -buildvcs=false -trimpath -ldflags="-H=windowsgui" -o KeeperLoader-Manager.exe .
-
-      - name: Verify product metadata
+      - name: Verify release structure and metadata
         shell: pwsh
         run: |
           $version = (Get-Content VERSION -Raw).Trim()
+          if ($version -ne "0.7.0") { throw "This workflow publishes v0.7.0, but VERSION is $version" }
           $metadata = (Get-Item KeeperLoader-Manager.exe).VersionInfo
-          if ($metadata.ProductName -ne "KeeperLoader") {
-            throw "KeeperLoader product metadata is missing"
+          if ($metadata.ProductVersion -ne $version) { throw "Manager metadata does not match VERSION" }
+          $apiBlob = (git hash-object src/API/KeeperLoaderApi.cs).Trim()
+          if ($apiBlob -ne "0cc3c28cdb6cb51a88709c5b23e45fb40f5cac72") {
+            throw "KeeperLoader API changed; native mods may require changes"
           }
-          if ($metadata.ProductVersion -ne $version) {
-            throw "Executable product version does not match VERSION"
-          }
-          if ($metadata.OriginalFilename -ne "KeeperLoader-Manager.exe") {
-            throw "Executable original filename metadata is invalid"
+          if (Get-ChildItem runtime-package -Recurse -File -Filter *.exe) {
+            throw "Executable found in Nexus runtime package"
           }
 
-      - name: Scan with Microsoft Defender
+      - name: Scan all release payloads with Microsoft Defender
         shell: pwsh
         run: |
           if (-not (Get-Command Get-MpComputerStatus -ErrorAction SilentlyContinue)) {
             throw "Microsoft Defender cmdlets are unavailable on this runner"
           }
           $status = Get-MpComputerStatus
-          if (-not $status.AntivirusEnabled) {
-            throw "Microsoft Defender Antivirus is disabled on this runner"
-          }
+          if (-not $status.AntivirusEnabled) { throw "Microsoft Defender Antivirus is disabled on this runner" }
           Update-MpSignature -ErrorAction Continue
-          $manager = (Resolve-Path KeeperLoader-Manager.exe).Path
-          Start-MpScan -ScanType CustomScan -ScanPath $manager -ErrorAction Stop
+          $targets = @(
+            (Resolve-Path runtime-package).Path,
+            (Resolve-Path "dist/KeeperLoader-GraveyardKeeper-Runtime-v*.zip").Path,
+            (Resolve-Path KeeperLoader-Manager.exe).Path,
+            (Resolve-Path "dist/KeeperLoader-Manager-Windows-x64-v*.zip").Path
+          )
+          foreach ($target in $targets) { Start-MpScan -ScanType CustomScan -ScanPath $target -ErrorAction Stop }
+          $roots = $targets | ForEach-Object { $_.ToLowerInvariant() }
           $detections = Get-MpThreatDetection | Where-Object {
-            $_.Resources -and (($_.Resources -join "`n") -like "*$manager*")
+            $resources = ($_.Resources -join "`n").ToLowerInvariant()
+            $roots | Where-Object { $resources -like "*$_*" }
           }
           if ($detections) {
             $detections | Format-List * | Out-String | Write-Host
-            throw "Microsoft Defender detected the KeeperLoader manager build"
+            throw "Microsoft Defender detected a KeeperLoader release payload"
           }
-
-      - name: Package release
-        id: package
-        shell: pwsh
-        run: |
-          $version = (Get-Content VERSION -Raw).Trim()
-          $expected = "0.6.2"
-          if ($version -ne $expected) {
-            throw "This workflow publishes v$expected, but VERSION is $version"
-          }
-          $hash = (Get-FileHash KeeperLoader-Manager.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  KeeperLoader-Manager.exe" | Set-Content SHA256SUMS.txt
-          $archive = "KeeperLoader-Windows-x64-v$version.zip"
-          $files = @(
-            "KeeperLoader-Manager.exe",
-            "VERSION",
-            "README.md",
-            "DEVELOPING_MODS.md",
-            "LICENSE",
-            "THIRD_PARTY.md",
-            "THIRD_PARTY_LICENSES.txt",
-            "SHA256SUMS.txt"
-          )
-          Compress-Archive -Path $files -DestinationPath $archive -CompressionLevel Optimal
-          "archive=$archive" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Publish GitHub release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          ARCHIVE: ${{ steps.package.outputs.archive }}
-          VERSION: ${{ steps.package.outputs.version }}
         run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $runtime = (Resolve-Path "dist/KeeperLoader-GraveyardKeeper-Runtime-v$version.zip").Path
+          $manager = (Resolve-Path "dist/KeeperLoader-Manager-Windows-x64-v$version.zip").Path
           @"
-          ## KeeperLoader v$env:VERSION
+          ## KeeperLoader v$version for Graveyard Keeper
 
-          Portable Windows x64 release for Graveyard Keeper and compatible Unity Mono games.
+          ### Recommended Nexus/manual download
 
-          ### Highlights
+          **KeeperLoader-GraveyardKeeper-Runtime-v$version.zip** is the clean, executable-free runtime package. It contains precompiled managed KeeperLoader DLLs and the official unmodified UnityDoorstop x64 proxy. It contains no EXE, downloader, self-updater, compiler, scripts, or external-plugin loader.
 
-          - Install, update, enable, disable, restore and remove KeeperLoader mods.
-          - Launch supported games through Steam.
-          - Preserve mod configuration, state and backups during updates.
-          - User-selected safe mode for one launch.
-          - Validated mod packages with SHA-256 integrity checks.
-          - External plugin loading removed; existing native mods remain compatible.
+          Extract it directly beside `Graveyard Keeper.exe` while the game is closed.
 
-          ### Installation
+          ### Optional manager
 
-          1. Download **$env:ARCHIVE**.
-          2. Extract it to a permanent folder outside the game installation.
-          3. Run `KeeperLoader-Manager.exe`.
-          4. Select **Scan Steam**.
-          5. Select Graveyard Keeper and choose **Enable / update selected**.
+          **KeeperLoader-Manager-Windows-x64-v$version.zip** keeps Steam detection, validated native-mod installation and updates, enable/disable, rollback, safe mode, complete removal, and the existing verified manager updater. The manager is distributed separately because it is a Windows executable and is not required in the Nexus runtime file.
 
-          The executable is currently unsigned. Do not disable antivirus protection or create exclusions. Verify `KeeperLoader-Manager.exe` against `SHA256SUMS.txt`.
+          Existing native KeeperLoader mods require no source or package changes. The public API source is byte-for-byte unchanged from v0.6.2 and CI enforces that compatibility boundary.
+
+          Microsoft Defender scans both release payloads before publication. A multi-vendor service can still produce heuristic false positives, so no project can guarantee a particular future VirusTotal result. Do not disable antivirus or create exclusions.
           "@ | Set-Content RELEASE_NOTES.md
 
-          $tag = "v$env:VERSION"
+          $tag = "v$version"
           gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag $env:ARCHIVE --repo $env:GITHUB_REPOSITORY --clobber
-            if ($LASTEXITCODE -ne 0) { throw "Could not update release asset" }
-            gh release edit $tag --repo $env:GITHUB_REPOSITORY --title "KeeperLoader v$env:VERSION" --notes-file RELEASE_NOTES.md --prerelease
-            if ($LASTEXITCODE -ne 0) { throw "Could not update release metadata" }
+            gh release upload $tag $runtime $manager --repo $env:GITHUB_REPOSITORY --clobber
+            if ($LASTEXITCODE -ne 0) { throw "Could not update release assets" }
+            gh release edit $tag --repo $env:GITHUB_REPOSITORY --title "KeeperLoader v$version" --notes-file RELEASE_NOTES.md --prerelease
           } else {
-            gh release create $tag $env:ARCHIVE --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "KeeperLoader v$env:VERSION" --notes-file RELEASE_NOTES.md --prerelease
-            if ($LASTEXITCODE -ne 0) { throw "Could not create release" }
+            gh release create $tag $runtime $manager --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "KeeperLoader v$version" --notes-file RELEASE_NOTES.md --prerelease
           }
+          if ($LASTEXITCODE -ne 0) { throw "Could not publish release" }

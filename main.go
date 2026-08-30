@@ -58,14 +58,14 @@ func main() {
 	var scanButton, addButton, managerUpdateButton, enableButton, disableButton, manageButton, savesButton, launchButton *walk.PushButton
 	window := MainWindow{
 		AssignTo: &app.mw,
-		Title:    "KeeperLoader Universal Manager " + loaderVersion,
+		Title:    "KeeperLoader for Graveyard Keeper " + loaderVersion,
 		MinSize:  Size{Width: 850, Height: 580},
 		Size:     Size{Width: 980, Height: 650},
 		Layout:   VBox{MarginsZero: false, Spacing: 8},
 		Children: []Widget{
-			Label{Text: "KeeperLoader Universal Manager", Font: Font{Family: "Segoe UI", PointSize: 16, Bold: true}},
-			Label{Text: "Native Windows manager for compatible Unity Mono games"},
-			ListBox{AssignTo: &app.list, Model: app.model, MultiSelection: true, MinSize: Size{Height: 290}},
+			Label{Text: "KeeperLoader for Graveyard Keeper", Font: Font{Family: "Segoe UI", PointSize: 16, Bold: true}},
+			Label{Text: "Install and manage KeeperLoader and native mods for Graveyard Keeper"},
+			ListBox{AssignTo: &app.list, Model: app.model, MultiSelection: false, MinSize: Size{Height: 290}},
 			Composite{Layout: HBox{MarginsZero: true, Spacing: 7}, Children: []Widget{
 				PushButton{AssignTo: &scanButton, Text: "Scan Steam", OnClicked: func() { app.scanSteam() }},
 				PushButton{AssignTo: &addButton, Text: "Add game…", OnClicked: func() { app.addGame() }},
@@ -82,7 +82,7 @@ func main() {
 			}},
 			Label{Text: "Activity"},
 			TextEdit{AssignTo: &app.log, ReadOnly: true, VScroll: true, MinSize: Size{Height: 115}, Text: "Ready."},
-			Label{AssignTo: &app.status, Text: "Select one or more games. Ctrl-click selects multiple entries."},
+			Label{AssignTo: &app.status, Text: "Select your Graveyard Keeper installation."},
 		},
 	}
 	if err := window.Create(); err != nil {
@@ -163,14 +163,18 @@ func (app *application) scanSteam() {
 			if saveErr := saveRememberedGames(app.model.items); saveErr != nil {
 				app.appendLog("Could not remember game locations: " + saveErr.Error())
 			}
-			app.appendLog(fmt.Sprintf("Steam scan found %d compatible game(s).", len(games)))
+			if len(games) == 0 {
+				app.appendLog("Steam scan did not find Graveyard Keeper.")
+			} else {
+				app.appendLog("Steam scan found Graveyard Keeper.")
+			}
 		})
 	}()
 }
 
 func (app *application) addGame() {
 	dialog := new(walk.FileDialog)
-	dialog.Title = "Select a Windows Unity game folder"
+	dialog.Title = "Select the Graveyard Keeper game folder"
 	accepted, err := dialog.ShowBrowseFolder(app.mw)
 	if err != nil {
 		walk.MsgBox(app.mw, "Folder selection failed", err.Error(), walk.MsgBoxIconError)
@@ -186,6 +190,10 @@ func (app *application) addGame() {
 	}
 	if !game.Supported {
 		walk.MsgBox(app.mw, "Unsupported Unity game", game.Reason, walk.MsgBoxIconWarning)
+		return
+	}
+	if game.GameID != graveyardKeeperGameID {
+		walk.MsgBox(app.mw, "Wrong game", "The selected folder is not a Graveyard Keeper installation.", walk.MsgBoxIconWarning)
 		return
 	}
 	game.SteamAppID = steamAppIDForGameDirectory(game.GameDirectory)

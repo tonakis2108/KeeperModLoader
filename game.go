@@ -15,6 +15,11 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
+const (
+	graveyardKeeperGameID     = "graveyard-keeper"
+	graveyardKeeperSteamAppID = "599140"
+)
+
 type GameInfo struct {
 	GameDirectory    string `json:"-"`
 	ExecutablePath   string `json:"-"`
@@ -297,13 +302,16 @@ func scanSteamGames() ([]*GameInfo, error) {
 				continue
 			}
 			game, detectErr := detectUnityGame(filepath.Join(common, entry.Name()))
-			if detectErr != nil || !game.Supported {
+			if detectErr != nil || !game.Supported || game.GameID != graveyardKeeperGameID {
 				continue
 			}
 			key := strings.ToLower(game.GameDirectory)
 			if !seen[key] {
-				seen[key] = true
 				game.SteamAppID = installations[key]
+				if game.SteamAppID != graveyardKeeperSteamAppID {
+					continue
+				}
+				seen[key] = true
 				games = append(games, game)
 			}
 		}

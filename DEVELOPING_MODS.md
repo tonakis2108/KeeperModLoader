@@ -1,4 +1,4 @@
-# Developing KeeperLoader mods
+# Developing KeeperLoader mods for Graveyard Keeper
 
 ## Minimal mod
 
@@ -53,7 +53,7 @@ For the dedicated **Update selected from ZIP...** workflow, keep the mod ID unch
 
 Users can disable a mod through the manager without uninstalling it. KeeperLoader skips the disabled mod's assemblies and preserves its package files, configuration, state, and backups. A disabled mod receives no lifecycle callbacks until the user enables it and starts the game again.
 
-Every package must list explicit normalized game IDs shown by the manager. Wildcard compatibility is rejected, including for UI-only mods. Multiple IDs are entered as a comma-separated list.
+Every package must declare `graveyard-keeper` in `supportedGames`. Wildcard compatibility is rejected, including for UI-only mods.
 
 ## Metadata rules
 
@@ -96,11 +96,9 @@ The third argument marks the dependency as optional when `true`. Required depend
 
 Use `StateDirectory` for mod-owned persistent state. Never modify game saves unless that is the explicit purpose of the mod and users are clearly warned.
 
-## Cross-game compatibility
+## Game compatibility
 
-The lifecycle, logging, configuration, state, and common Unity APIs are portable across supported Unity Mono games. Game-owned classes are not. A reference to `Assembly-CSharp.dll`, a reflected player type, a scene name, or a save schema normally makes the mod game-specific.
-
-Keep universal code behind KeeperLoader and Unity API boundaries. Place game adapters in separate assemblies or packages, and declare every supported game ID honestly. The installer enforces that declaration before activation.
+The lifecycle, logging, configuration, state, and common Unity APIs are loader-owned. Graveyard Keeper behavior is game-owned. A reference to `Assembly-CSharp.dll`, a reflected player type, a scene name, or a save schema can make a mod dependent on a particular game update. Test against the current Steam build and declare `graveyard-keeper`; the installer enforces that declaration before activation.
 
 ## Configuration
 
