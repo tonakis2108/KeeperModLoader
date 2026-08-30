@@ -1,5 +1,7 @@
 // Compile-only Unity API facade for CI release builds.
 // This assembly is never distributed. Graveyard Keeper supplies the real assembly.
+using System;
+
 namespace UnityEngine
 {
     public class Object
