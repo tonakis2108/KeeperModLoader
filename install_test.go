@@ -10,13 +10,13 @@ import (
 	"testing"
 )
 
-func TestValidateRuntimePayloadAcceptsCompleteMatchingPayload(t *testing.T) {
-	root := t.TempDir()
+func writeTestRuntimePayload(t *testing.T, root, version string) {
+	t.Helper()
 	contents := map[string][]byte{
 		"KeeperLoader/core/KeeperLoader.API.dll":       []byte("api"),
 		"KeeperLoader/core/KeeperLoader.Bootstrap.dll": []byte("bootstrap"),
 		"KeeperLoader/core/KeeperLoader.Runtime.dll":   []byte("runtime"),
-		"KeeperLoader/state/game.json": []byte(fmt.Sprintf(`{"gameId":"%s","architecture":"x64","keeperLoaderVersion":"%s"}`, graveyardKeeperGameID, loaderVersion)),
+		"KeeperLoader/state/game.json": []byte(fmt.Sprintf(`{"gameId":"%s","architecture":"x64","keeperLoaderVersion":"%s"}`, graveyardKeeperGameID, version)),
 		"doorstop_config.ini": []byte("[General]\ntarget_assembly=KeeperLoader\\core\\KeeperLoader.Bootstrap.dll\n"),
 		"winhttp.dll":         []byte("proxy"),
 	}
@@ -38,6 +38,11 @@ func TestValidateRuntimePayloadAcceptsCompleteMatchingPayload(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "SHA256SUMS.txt"), []byte(strings.Join(checksums, "\n")+"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestValidateRuntimePayloadAcceptsCompleteMatchingPayload(t *testing.T) {
+	root := t.TempDir()
+	writeTestRuntimePayload(t, root, loaderVersion)
 	if err := validateRuntimePayload(root); err != nil {
 		t.Fatal(err)
 	}
@@ -46,6 +51,18 @@ func TestValidateRuntimePayloadAcceptsCompleteMatchingPayload(t *testing.T) {
 	}
 	if err := validateRuntimePayload(root); err == nil {
 		t.Fatal("tampered runtime payload was accepted")
+	}
+}
+
+func TestValidateRuntimePayloadUsesStagedManagerVersionDuringUpgrade(t *testing.T) {
+	root := t.TempDir()
+	stagedVersion := "9.8.7"
+	writeTestRuntimePayload(t, root, stagedVersion)
+	if err := validateRuntimePayloadForVersion(root, stagedVersion); err != nil {
+		t.Fatalf("staged runtime was not validated against its package version: %v", err)
+	}
+	if err := validateRuntimePayload(root); err == nil {
+		t.Fatal("staged runtime unexpectedly matched the current manager version")
 	}
 }
 

@@ -212,7 +212,7 @@ func stageManagerUpdate(packagePath string) (string, error) {
 		}
 	}
 	stagedExecutable := filepath.Join(updateDirectory, managerExecutableName)
-	if err = validateRuntimePayload(filepath.Join(updateDirectory, runtimePayloadDirectory)); err != nil {
+	if err = validateRuntimePayloadForVersion(filepath.Join(updateDirectory, runtimePayloadDirectory), newVersion); err != nil {
 		_ = os.RemoveAll(updateDirectory)
 		return "", fmt.Errorf("manager update runtime rejected: %w", err)
 	}
