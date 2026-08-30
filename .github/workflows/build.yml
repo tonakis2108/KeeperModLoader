@@ -46,6 +46,10 @@ jobs:
         shell: pwsh
         run: ./scripts/build-runtime.ps1
 
+      - name: Verify legacy source-package conversion
+        shell: pwsh
+        run: ./scripts/test-legacy-converter.ps1
+
       - name: Generate Windows resource
         run: go generate ./...
 

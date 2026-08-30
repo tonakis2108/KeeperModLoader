@@ -49,6 +49,21 @@ For distribution, do not ask players to copy that directory manually. Put the co
 
 Players install the resulting ZIP through **Install Mod ZIP...**. KeeperLoader verifies its manifest and every file hash, stages installation, and backs up an older version with the same mod ID.
 
+## Converting source-only packages from KeeperLoader 0.6.x
+
+Early KeeperLoader packages could contain C# source and a `build` section instead of a compiled DLL. Current releases do not execute a compiler on a player's PC. Publishers can convert those packages without changing the mod ID, the mod API, or the source code:
+
+```powershell
+.\scripts\convert-legacy-mod.ps1 `
+  -Package .\MyMod-legacy.zip `
+  -ManagedDirectory "C:\Program Files (x86)\Steam\steamapps\common\Graveyard Keeper\Graveyard Keeper_Data\Managed" `
+  -OutputPackage .\MyMod-precompiled.zip
+```
+
+The converter validates the old manifest and file hashes, compiles against the checked-in KeeperLoader API and the selected game's Unity assemblies, adds the output DLL to the verified file list, and writes a new installable ZIP. Compilation happens only on the publisher's build computer. Players keep using **Update selected from ZIP...** normally, including when updating an installed mod that was originally built by an older KeeperLoader version.
+
+The converted package intentionally retains the legacy source and `build` metadata for transparency. Current managers accept that transitional format only when the exact output DLL named by `build.output` is present and SHA-256 hashed in the manifest.
+
 For the dedicated **Update selected from ZIP...** workflow, keep the mod ID unchanged and increase the numeric version. The manager rejects ID changes, equal versions, and downgrades. Mod settings should remain in `KeeperContext.ConfigDirectory` and persistent data in `KeeperContext.StateDirectory`; those locations are preserved across updates and rollback.
 
 Users can disable a mod through the manager without uninstalling it. KeeperLoader skips the disabled mod's assemblies and preserves its package files, configuration, state, and backups. A disabled mod receives no lifecycle callbacks until the user enables it and starts the game again.
