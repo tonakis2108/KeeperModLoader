@@ -100,7 +100,7 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content VERSION -Raw).Trim()
-          $expected = "0.6.1"
+          $expected = "0.6.2"
           if ($version -ne $expected) {
             throw "This workflow publishes v$expected, but VERSION is $version"
           }
@@ -140,6 +140,7 @@ jobs:
           - Preserve mod configuration, state and backups during updates.
           - User-selected safe mode for one launch.
           - Validated mod packages with SHA-256 integrity checks.
+          - External plugin loading removed; existing native mods remain compatible.
 
           ### Installation
 

@@ -1,6 +1,6 @@
-# KeeperLoader 0.6.1 Alpha
+# KeeperLoader 0.6.2 Alpha
 
-KeeperLoader is a compact, general-purpose mod loader for **Windows Unity Mono games**. It uses UnityDoorstop to enter the game's existing Mono runtime, waits for managed game code to load, attaches one persistent Unity host, and then loads compatible KeeperLoader mods. Version 0.6.1 can also launch detected Steam games through their registered Steam App ID.
+KeeperLoader is a compact, general-purpose mod loader for **Windows Unity Mono games**. It uses UnityDoorstop to enter the game's existing Mono runtime, waits for managed game code to load, attaches one persistent Unity host, and then loads compatible KeeperLoader mods. Version 0.6.2 can also launch detected Steam games through their registered Steam App ID.
 
 ## Supported game profile
 
@@ -19,10 +19,10 @@ Explicitly unsupported in this release:
 
 - Unity IL2CPP games. IL2CPP turns managed game code into native code and requires a different CoreCLR/native-interoperability runtime.
 - Linux, macOS, consoles, UWP, and ARM64.
-- External plugins that require an absent runtime, preloader, patcher, service, or incompatible Unity/.NET environment. KeeperLoader reports these as incompatible instead of treating their successful installation as proof they can run.
+- External plugin packages. KeeperLoader 0.6.2 accepts only native packages built for the KeeperLoader API.
 - Anti-cheat-protected or competitive online games. Do not inject a mod loader where a game's rules prohibit modification.
 
-Unity documents the Windows player as an executable paired with a `ProjectName_Data` directory. Unity also distinguishes Mono's managed JIT runtime from IL2CPP's ahead-of-time native pipeline. UnityDoorstop supports entry into both, but its IL2CPP path requires a separate CoreCLR environment; KeeperLoader 0.6.1 deliberately accepts only the shared Mono path.
+Unity documents the Windows player as an executable paired with a `ProjectName_Data` directory. Unity also distinguishes Mono's managed JIT runtime from IL2CPP's ahead-of-time native pipeline. UnityDoorstop supports entry into both, but its IL2CPP path requires a separate CoreCLR environment; KeeperLoader 0.6.2 deliberately accepts only the shared Mono path.
 
 KeeperLoader retains the deferred initialization introduced in 0.2.1: it creates its Unity host only after the first `SceneManager.sceneLoaded` callback. This avoids invoking `GameObject` APIs during Doorstop's early assembly-loading phase, which could stall startup on a black screen.
 
@@ -90,17 +90,15 @@ After updating the manager, select enabled games that display **Update available
 4. Choose a KeeperLoader mod package.
 5. Restart the game after installation.
 
-## Experimental external Unity plugin ZIPs
+## External plugin migration
 
-Use **Install External Plugin ZIP...** only for a Unity Mono plugin package that has no `keepermod.json`. KeeperLoader displays a warning before accepting the package, rejects unsafe archive paths and blocked executable or script types, requires at least one DLL, creates its own game-specific activation record, and marks the package as **External: Pending**.
+The experimental external-plugin loader was removed in KeeperLoader 0.6.2. Packages installed through that retired path remain visible as **Legacy external: Inactive** so they can be uninstalled safely, but the game runtime never loads them.
 
-On the next game start, KeeperLoader inspects the package in isolation. It attempts to attach concrete Unity `MonoBehaviour` plugin entry points that carry strong external plugin metadata. The list changes to **External: Loaded** when at least one component attaches, or **External: Incompatible** when required dependencies are missing or no supported entry point can be created. Details are written to `KeeperLoader\logs\latest.log` and `KeeperLoader\state\<mod-id>\external-plugin.status`.
-
-This is best-effort compatibility, not emulation of another loader. KeeperLoader does not supply an absent third-party runtime, configuration service, logging service, chainloader, preloader, or patching system. Installing an external package therefore does not guarantee that it will run. A package containing all compatible dependencies has the best chance; source-level conversion to the native KeeperLoader API remains the reliable solution.
+Native KeeperLoader mods do not require changes. Existing packages that omit `entryMode`, or explicitly declare `entryMode: "native"`, continue to install and load with the same API, manifest, configuration, state, enable/disable, update, rollback, and uninstall behavior.
 
 ## Updating and restoring mods
 
-To update an installed mod, close the game, select the mod in **Manage mods...**, choose **Update selected from ZIP...**, and select its newer package. KeeperLoader native packages require the same mod ID and a strictly newer version, then repeat the complete package, hash, backend, loader-version, and game-ID validation. An external package update deliberately keeps the selected managed ID, resets its compatibility status to **Pending**, and is tested again on the next launch.
+To update an installed mod, close the game, select the mod in **Manage mods...**, choose **Update selected from ZIP...**, and select its newer package. KeeperLoader native packages require the same mod ID and a strictly newer version, then repeat the complete package, hash, backend, loader-version, and game-ID validation.
 
 The active mod folder moves to `KeeperLoader\backup\mods` before the new version is activated. Configuration in `KeeperLoader\config`, state in `KeeperLoader\state\<mod-id>`, and game saves remain untouched. If the updated mod misbehaves, use **Restore previous** while the game is closed; the replaced version is also backed up, so rollback remains reversible.
 
@@ -128,15 +126,12 @@ KeeperLoader can provide the same loader-level facilities across supported games
 - Exception isolation and automatic disabling after repeated callback failures
 - User-selected, one-launch safe mode
 - Validated ZIP installation, listing, updates, rollback, and complete uninstall
-- Explicit, isolated best-effort loading for external Unity plugin ZIPs
 
 Game behavior is not standardized. Player types, inventories, maps, quests, save formats, and camera logic differ between games. A loader may be portable while a minimap or gameplay mod is not. Package compatibility declarations prevent that distinction from becoming an expensive surprise.
 
 ## Package integrity and recovery
 
 Before installing a native package, KeeperLoader checks archive paths, duplicate entries, expanded size, blocked script/executable types, the complete declared payload, every SHA-256 digest, loader/backend compatibility, and supported game IDs. Source packages are compiled locally against the selected game's Unity assemblies.
-
-External packages have no trusted KeeperLoader manifest. Their separate installer still checks archive paths, duplicates, expanded size, blocked types, and the presence of DLL content, then records SHA-256 digests in a generated local manifest. Those generated hashes protect subsequent local management; they do not authenticate the external publisher.
 
 After validation, the manager writes a game-specific activation record. The runtime rechecks that record and skips unmanaged, partially installed, or wrong-game mod folders.
 

@@ -11,13 +11,11 @@ namespace KeeperLoader.Runtime
         private readonly string _loaderDirectory;
         private readonly FileLogger _coreLog;
         private readonly List<LoadedMod> _loaded = new List<LoadedMod>();
-        private readonly ExternalPluginCatalog _external;
 
         public ModCatalog(string loaderDirectory, FileLogger coreLog)
         {
             _loaderDirectory = loaderDirectory;
             _coreLog = coreLog;
-            _external = new ExternalPluginCatalog(loaderDirectory, coreLog);
         }
 
         public void DiscoverAndLoad()
@@ -25,7 +23,6 @@ namespace KeeperLoader.Runtime
             string modsDirectory = Path.Combine(_loaderDirectory, "mods");
             Directory.CreateDirectory(modsDirectory);
             List<string> dllList = new List<string>();
-            List<string> externalDirectories = new List<string>();
             string[] modDirectories = Directory.GetDirectories(modsDirectory, "*", SearchOption.TopDirectoryOnly);
             Array.Sort(modDirectories, StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < modDirectories.Length; i++)
@@ -40,9 +37,17 @@ namespace KeeperLoader.Runtime
                 string entryMode;
                 if (!IsActivatedForCurrentGame(modDirectories[i], out entryMode)) continue;
                 if (entryMode.Equals("external-unity-plugin", StringComparison.OrdinalIgnoreCase))
-                    externalDirectories.Add(modDirectories[i]);
-                else
-                    dllList.AddRange(Directory.GetFiles(modDirectories[i], "*.dll", SearchOption.AllDirectories));
+                {
+                    _coreLog.Warning("Skipped inactive legacy external package '" + name +
+                        "'. External plugin support was removed in KeeperLoader 0.6.2; uninstall it through the manager.");
+                    continue;
+                }
+                if (!entryMode.Equals("native", StringComparison.OrdinalIgnoreCase))
+                {
+                    _coreLog.Error("Skipped mod folder '" + name + "': unsupported entry mode '" + entryMode + "'.");
+                    continue;
+                }
+                dllList.AddRange(Directory.GetFiles(modDirectories[i], "*.dll", SearchOption.AllDirectories));
             }
             string[] dlls = dllList.ToArray();
             Array.Sort(dlls, StringComparer.OrdinalIgnoreCase);
@@ -51,11 +56,8 @@ namespace KeeperLoader.Runtime
 
             for (int i = 0; i < dlls.Length; i++) DiscoverAssembly(dlls[i], candidates, byId);
             LoadInDependencyOrder(candidates, byId);
-            int externalLoaded = 0;
-            for (int i = 0; i < externalDirectories.Count; i++)
-                externalLoaded += _external.DiscoverAndLoad(externalDirectories[i]);
-            _coreLog.Info("Loaded " + _loaded.Count + " native mod(s) and " + externalLoaded +
-                " external component(s). Native discovery found " + candidates.Count + " candidate(s).");
+            _coreLog.Info("Loaded " + _loaded.Count + " native mod(s). Discovery found " +
+                candidates.Count + " candidate(s).");
         }
 
         private bool IsActivatedForCurrentGame(string modDirectory, out string entryMode)
@@ -291,7 +293,6 @@ namespace KeeperLoader.Runtime
 
         public void UnloadAll()
         {
-            _external.UnloadAll();
             for (int i = _loaded.Count - 1; i >= 0; i--)
             {
                 try { _loaded[i].Instance.OnUnload(); }
