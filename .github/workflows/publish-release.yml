@@ -48,7 +48,7 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content VERSION -Raw).Trim()
-          if ($version -ne "0.7.1") { throw "This workflow publishes v0.7.1, but VERSION is $version" }
+          if ($version -ne "0.7.2") { throw "This workflow publishes v0.7.2, but VERSION is $version" }
           $metadata = (Get-Item KeeperLoader-Manager.exe).VersionInfo
           if ($metadata.ProductVersion -ne $version) { throw "Manager metadata does not match VERSION" }
           $apiBlob = (git hash-object src/API/KeeperLoaderApi.cs).Trim()

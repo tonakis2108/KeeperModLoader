@@ -111,23 +111,13 @@ func (app *application) setBusy(busy bool, message string) {
 	app.status.SetText(message)
 }
 
-func (app *application) selectedGames(requireOne bool) []*GameInfo {
-	indexes := app.list.SelectedIndexes()
-	if len(indexes) == 0 {
+func (app *application) selectedGames() []*GameInfo {
+	index := app.list.CurrentIndex()
+	if !validSelection(index, len(app.model.items)) {
 		walk.MsgBox(app.mw, "No game selected", "Select at least one game first.", walk.MsgBoxIconInformation)
 		return nil
 	}
-	if requireOne && len(indexes) != 1 {
-		walk.MsgBox(app.mw, "Select one game", "Select exactly one game for this operation.", walk.MsgBoxIconInformation)
-		return nil
-	}
-	result := make([]*GameInfo, 0, len(indexes))
-	for _, index := range indexes {
-		if index >= 0 && index < len(app.model.items) {
-			result = append(result, app.model.items[index])
-		}
-	}
-	return result
+	return []*GameInfo{app.model.items[index]}
 }
 
 func mergeGames(existing, added []*GameInfo) []*GameInfo {
@@ -210,7 +200,7 @@ func (app *application) addGame() {
 }
 
 func (app *application) launchSelected() {
-	games := app.selectedGames(true)
+	games := app.selectedGames()
 	if len(games) != 1 {
 		return
 	}
@@ -229,7 +219,7 @@ func (app *application) launchSelected() {
 }
 
 func (app *application) enableSelected() {
-	games := app.selectedGames(false)
+	games := app.selectedGames()
 	if len(games) == 0 {
 		return
 	}
@@ -250,7 +240,7 @@ func (app *application) enableSelected() {
 }
 
 func (app *application) disableSelected() {
-	games := app.selectedGames(false)
+	games := app.selectedGames()
 	if len(games) == 0 {
 		return
 	}
@@ -274,7 +264,7 @@ func (app *application) disableSelected() {
 }
 
 func (app *application) manageSelected() {
-	games := app.selectedGames(true)
+	games := app.selectedGames()
 	if len(games) != 1 {
 		return
 	}
@@ -287,7 +277,7 @@ func (app *application) manageSelected() {
 }
 
 func (app *application) openSaves() {
-	games := app.selectedGames(true)
+	games := app.selectedGames()
 	if len(games) != 1 {
 		return
 	}
