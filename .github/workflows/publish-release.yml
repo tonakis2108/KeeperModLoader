@@ -2,6 +2,10 @@ name: Publish KeeperLoader Release
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-release.yml
 
 permissions:
   contents: write
