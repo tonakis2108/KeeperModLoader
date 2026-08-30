@@ -48,7 +48,7 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content VERSION -Raw).Trim()
-          if ($version -ne "0.7.4") { throw "This workflow publishes v0.7.4, but VERSION is $version" }
+          if ($version -ne "0.7.5") { throw "This workflow publishes v0.7.5, but VERSION is $version" }
           $metadata = (Get-Item KeeperLoader-Manager.exe).VersionInfo
           if ($metadata.ProductVersion -ne $version) { throw "Manager metadata does not match VERSION" }
           $apiBlob = (git hash-object src/API/KeeperLoaderApi.cs).Trim()
@@ -124,9 +124,9 @@ jobs:
 
           **KeeperLoader-Manager-Windows-x64-v$version.zip** keeps Steam detection, validated native-mod installation and updates, enable/disable, rollback, safe mode, complete removal, and the verified manager updater. Extract the complete ZIP, run the manager, and select **Install / update KeeperLoader**. The manager now installs the bundled precompiled runtime without downloading UnityDoorstop or invoking a compiler on the player's PC.
 
-          Version 0.7.4 includes the Graveyard Keeper Unity startup fix from v0.7.3 and corrects manager upgrades so a staged runtime is validated against the new package version rather than the currently running manager version.
+          Version 0.7.5 corrects the precompiled Unity API member contract that prevented the runtime host from being created on Graveyard Keeper. Host creation is also deferred until Unity enters its frame loop, restoring native mod startup and per-frame callbacks.
 
-          Managers older than v0.7.4 cannot apply this update through **Install manager update** because of that validation bug. Extract the complete v0.7.4 ZIP into a new folder and run it directly once. Future updates can use the in-manager updater normally.
+          Managers v0.7.4 and newer can apply this update through **Install manager update**. Managers v0.7.3 and older must extract the complete v0.7.5 ZIP into a new folder and run it directly once because their updater contains the older cross-version validation bug.
 
           Existing compiled native KeeperLoader mods require no source or API changes. The public API source is byte-for-byte unchanged from v0.6.2 and CI enforces that compatibility boundary. Legacy source-only ZIPs must be converted once on the publisher side; the manager never compiles code on a player's PC.
 

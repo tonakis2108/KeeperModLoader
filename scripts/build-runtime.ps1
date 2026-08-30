@@ -40,11 +40,43 @@ $runtimeSources = Get-ChildItem (Join-Path $repository "src\Runtime\*.cs") | For
 & $csc /nologo /target:library "/out:$runtime" "/reference:$api" "/reference:$coreReference" "/reference:$textReference" "/reference:$imguiReference" $runtimeSources
 if ($LASTEXITCODE -ne 0) { throw "KeeperLoader runtime compilation failed" }
 
+$smokeSource = Join-Path $build "RuntimeHostSmoke.cs"
+$smokeExecutable = Join-Path $build "RuntimeHostSmoke.exe"
+@'
+using KeeperLoader.Runtime;
+using UnityEngine;
+
+internal static class RuntimeHostSmoke
+{
+    private static int Main()
+    {
+        RuntimeHost.Attach();
+        if (GameObject.Find("KeeperLoader Runtime") != null) return 1;
+        Application.RaiseBeforeRender();
+        if (GameObject.Find("KeeperLoader Runtime") == null) return 2;
+        Camera.RaisePreCull();
+        return 0;
+    }
+}
+'@ | Set-Content $smokeSource -Encoding UTF8
+& $csc /nologo /target:exe "/out:$smokeExecutable" "/reference:$runtime" "/reference:$api" "/reference:$coreReference" "/reference:$textReference" "/reference:$imguiReference" $smokeSource
+if ($LASTEXITCODE -ne 0) { throw "KeeperLoader runtime-host smoke test compilation failed" }
+& $smokeExecutable
+if ($LASTEXITCODE -ne 0) { throw "KeeperLoader runtime host was not deferred into the Unity frame loop" }
+
 $runtimeHostSource = Get-Content (Join-Path $repository "src\Runtime\RuntimeHost.cs") -Raw
 foreach ($forbidden in @("using UnityEngine.SceneManagement", "SceneManager.sceneLoaded", "SceneManager.GetActiveScene")) {
     if ($runtimeHostSource.Contains($forbidden)) {
         throw "Runtime reintroduced a hard dependency on an optional Unity scene API: $forbidden"
     }
+}
+foreach ($required in @("onBeforeRender", "onPreCull", "Unity frame loop detected")) {
+    if (-not $runtimeHostSource.Contains($required)) {
+        throw "Runtime is missing its deferred Unity startup contract: $required"
+    }
+}
+if ($runtimeHostSource.Contains("host.hideFlags")) {
+    throw "Runtime reintroduced the incompatible GameObject.hideFlags member reference"
 }
 
 $apiBlob = (git -C $repository hash-object "src/API/KeeperLoaderApi.cs").Trim()

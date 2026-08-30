@@ -9,16 +9,16 @@ namespace UnityEngine
 
     public sealed class GUIStyleState
     {
-        public Color textColor;
+        public Color textColor { get; set; }
     }
 
     public sealed class GUIStyle
     {
         public GUIStyle(GUIStyle source) { normal = new GUIStyleState(); }
-        public TextAnchor alignment;
-        public int fontSize;
-        public FontStyle fontStyle;
-        public GUIStyleState normal;
+        public TextAnchor alignment { get; set; }
+        public int fontSize { get; set; }
+        public FontStyle fontStyle { get; set; }
+        public GUIStyleState normal { get; set; }
     }
 
     public sealed class GUISkin
@@ -28,7 +28,7 @@ namespace UnityEngine
 
     public static class GUI
     {
-        public static Color backgroundColor;
+        public static Color backgroundColor { get; set; }
         public static string tooltip { get { return ""; } }
         public static GUISkin skin { get { return new GUISkin(); } }
         public static void Box(Rect position, GUIContent content, GUIStyle style) { }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using UnityEngine;
@@ -7,11 +8,93 @@ namespace KeeperLoader.Runtime
 {
     public static class RuntimeHost
     {
+        private static readonly List<EventSubscription> UnityReadySubscriptions =
+            new List<EventSubscription>();
+        private static bool _scheduled;
         private static bool _created;
 
         public static void Attach()
         {
+            if (_scheduled || _created) return;
+
+            // Doorstop executes before Unity's frame loop is necessarily ready.
+            // Creating a GameObject at that point can run Awake but leave the
+            // object outside the normal Update loop. Use rendering callbacks as
+            // a version-tolerant signal that Unity has entered its frame loop.
+            bool scheduled = TrySchedule(
+                "UnityEngine.Application, UnityEngine.CoreModule",
+                "onBeforeRender", "OnBeforeRender") ||
+                TrySchedule(
+                    "UnityEngine.Application, UnityEngine",
+                    "onBeforeRender", "OnBeforeRender");
+
+            scheduled = (TrySchedule(
+                "UnityEngine.Camera, UnityEngine.CoreModule",
+                "onPreCull", "OnCameraPreCull") ||
+                TrySchedule(
+                    "UnityEngine.Camera, UnityEngine",
+                    "onPreCull", "OnCameraPreCull")) || scheduled;
+
+            if (scheduled)
+            {
+                _scheduled = true;
+                RuntimeLog("Runtime host deferred until Unity enters its frame loop.");
+                return;
+            }
+
+            RuntimeLog("Unity frame-loop callbacks were unavailable; using immediate runtime attachment.");
+            CreateHost();
+        }
+
+        private static bool TrySchedule(string typeName, string eventName, string callbackName)
+        {
+            try
+            {
+                Type owner = Type.GetType(typeName, false);
+                if (owner == null) return false;
+                EventInfo readyEvent = owner.GetEvent(eventName,
+                    BindingFlags.Public | BindingFlags.Static);
+                if (readyEvent == null || readyEvent.EventHandlerType == null) return false;
+                MethodInfo callback = typeof(RuntimeHost).GetMethod(callbackName,
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                if (callback == null) return false;
+                Delegate handler = Delegate.CreateDelegate(readyEvent.EventHandlerType, callback, false);
+                if (handler == null) return false;
+                readyEvent.AddEventHandler(null, handler);
+                UnityReadySubscriptions.Add(new EventSubscription(readyEvent, handler));
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void OnBeforeRender()
+        {
+            OnUnityReady();
+        }
+
+        private static void OnCameraPreCull(Camera camera)
+        {
+            OnUnityReady();
+        }
+
+        private static void OnUnityReady()
+        {
             if (_created) return;
+            for (int i = 0; i < UnityReadySubscriptions.Count; i++)
+            {
+                try
+                {
+                    UnityReadySubscriptions[i].Event.RemoveEventHandler(
+                        null, UnityReadySubscriptions[i].Handler);
+                }
+                catch { }
+            }
+            UnityReadySubscriptions.Clear();
+            _scheduled = false;
+            RuntimeLog("Unity frame loop detected; creating runtime host.");
             CreateHost();
         }
 
@@ -25,10 +108,34 @@ namespace KeeperLoader.Runtime
                 return;
             }
             GameObject host = new GameObject("KeeperLoader Runtime");
-            host.hideFlags = HideFlags.HideAndDontSave;
             UnityEngine.Object.DontDestroyOnLoad(host);
             host.AddComponent<LoaderHost>();
             _created = true;
+        }
+
+        private static void RuntimeLog(string message)
+        {
+            try
+            {
+                string loader = Environment.GetEnvironmentVariable("KEEPERLOADER_DIR");
+                if (string.IsNullOrEmpty(loader)) return;
+                string path = Path.Combine(loader, "logs", "latest.log");
+                File.AppendAllText(path, DateTime.Now.ToString("HH:mm:ss.fff") +
+                    " [Runtime] " + message + Environment.NewLine);
+            }
+            catch { }
+        }
+
+        private sealed class EventSubscription
+        {
+            public readonly EventInfo Event;
+            public readonly Delegate Handler;
+
+            public EventSubscription(EventInfo readyEvent, Delegate handler)
+            {
+                Event = readyEvent;
+                Handler = handler;
+            }
         }
     }
 
@@ -52,14 +159,7 @@ namespace KeeperLoader.Runtime
             _log = new FileLogger(Path.Combine(_loaderDirectory, "logs", "latest.log"), "Core");
             _badgeVisibleUntil = Time.realtimeSinceStartup + 30f;
             _safeMode = string.Equals(Environment.GetEnvironmentVariable("KEEPERLOADER_SAFE_MODE"), "1");
-        }
-
-        private void Start()
-        {
-            // Unity calls Start on the next normal lifecycle pass. This keeps
-            // mod startup deferred until the engine is ready without relying
-            // on SceneManager events that older Graveyard Keeper builds lack.
-            _log.Info("KeeperLoader runtime 0.7.4 initialized for " +
+            _log.Info("KeeperLoader runtime 0.7.5 initialized for " +
                 Environment.GetEnvironmentVariable("KEEPERLOADER_GAME_ID") +
                 (_safeMode ? " in SAFE MODE." : "."));
             _catalog = new ModCatalog(_loaderDirectory, _log);
