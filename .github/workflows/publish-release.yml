@@ -48,7 +48,7 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content VERSION -Raw).Trim()
-          if ($version -ne "0.7.2") { throw "This workflow publishes v0.7.2, but VERSION is $version" }
+          if ($version -ne "0.7.3") { throw "This workflow publishes v0.7.3, but VERSION is $version" }
           $metadata = (Get-Item KeeperLoader-Manager.exe).VersionInfo
           if ($metadata.ProductVersion -ne $version) { throw "Manager metadata does not match VERSION" }
           $apiBlob = (git hash-object src/API/KeeperLoaderApi.cs).Trim()
@@ -124,7 +124,9 @@ jobs:
 
           **KeeperLoader-Manager-Windows-x64-v$version.zip** keeps Steam detection, validated native-mod installation and updates, enable/disable, rollback, safe mode, complete removal, and the verified manager updater. Extract the complete ZIP, run the manager, and select **Install / update KeeperLoader**. The manager now installs the bundled precompiled runtime without downloading UnityDoorstop or invoking a compiler on the player's PC.
 
-          Existing native KeeperLoader mods require no source or package changes. The public API source is byte-for-byte unchanged from v0.6.2 and CI enforces that compatibility boundary.
+          Version 0.7.3 removes the runtime's hard dependency on `SceneManager.sceneLoaded`, which is missing from Graveyard Keeper's older Unity Mono build. Mod loading no longer depends on a particular Unity scene API.
+
+          Existing compiled native KeeperLoader mods require no source or API changes. The public API source is byte-for-byte unchanged from v0.6.2 and CI enforces that compatibility boundary. Legacy source-only ZIPs must be converted once on the publisher side; the manager never compiles code on a player's PC.
 
           Microsoft Defender scans both release payloads before publication. A multi-vendor service can still produce heuristic false positives, so no project can guarantee a particular future VirusTotal result. Do not disable antivirus or create exclusions.
           "@ | Set-Content RELEASE_NOTES.md

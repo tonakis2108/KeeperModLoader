@@ -30,7 +30,7 @@ namespace Doorstop
                 Directory.CreateDirectory(Path.Combine(_loaderDirectory, "config"));
                 _logPath = Path.Combine(_loaderDirectory, "logs", "latest.log");
                 RotateLog();
-                Log("KeeperLoader bootstrap 0.7.0 starting.");
+                Log("KeeperLoader bootstrap 0.7.3 starting.");
                 Log("Process path: " + processPath);
 
                 PrepareEnvironment();
@@ -166,7 +166,7 @@ namespace Doorstop
                 Type host = runtime.GetType("KeeperLoader.Runtime.RuntimeHost", true);
                 MethodInfo attach = host.GetMethod("Attach", BindingFlags.Public | BindingFlags.Static);
                 attach.Invoke(null, null);
-                Log("Managed runtime scheduled for first Unity scene.");
+                Log("Managed runtime attached.");
             }
             catch (Exception exception)
             {

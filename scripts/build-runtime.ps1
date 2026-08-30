@@ -40,6 +40,13 @@ $runtimeSources = Get-ChildItem (Join-Path $repository "src\Runtime\*.cs") | For
 & $csc /nologo /target:library "/out:$runtime" "/reference:$api" "/reference:$coreReference" "/reference:$textReference" "/reference:$imguiReference" $runtimeSources
 if ($LASTEXITCODE -ne 0) { throw "KeeperLoader runtime compilation failed" }
 
+$runtimeHostSource = Get-Content (Join-Path $repository "src\Runtime\RuntimeHost.cs") -Raw
+foreach ($forbidden in @("using UnityEngine.SceneManagement", "SceneManager.sceneLoaded", "SceneManager.GetActiveScene")) {
+    if ($runtimeHostSource.Contains($forbidden)) {
+        throw "Runtime reintroduced a hard dependency on an optional Unity scene API: $forbidden"
+    }
+}
+
 $apiBlob = (git -C $repository hash-object "src/API/KeeperLoaderApi.cs").Trim()
 if ($apiBlob -ne "0cc3c28cdb6cb51a88709c5b23e45fb40f5cac72") {
     throw "KeeperLoader API changed; native mod compatibility review is required"

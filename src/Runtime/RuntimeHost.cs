@@ -1,39 +1,34 @@
 using System;
 using System.IO;
+using System.Reflection;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 
 namespace KeeperLoader.Runtime
 {
     public static class RuntimeHost
     {
-        private static bool _scheduled;
         private static bool _created;
 
         public static void Attach()
         {
-            if (_scheduled || _created) return;
-            _scheduled = true;
-            SceneManager.sceneLoaded += OnFirstSceneLoaded;
-        }
-
-        private static void OnFirstSceneLoaded(Scene scene, LoadSceneMode mode)
-        {
-            SceneManager.sceneLoaded -= OnFirstSceneLoaded;
-            _scheduled = false;
+            if (_created) return;
             CreateHost();
         }
 
         private static void CreateHost()
         {
             if (_created) return;
-            _created = true;
             GameObject existing = GameObject.Find("KeeperLoader Runtime");
-            if (existing != null) return;
+            if (existing != null)
+            {
+                _created = true;
+                return;
+            }
             GameObject host = new GameObject("KeeperLoader Runtime");
             host.hideFlags = HideFlags.HideAndDontSave;
             UnityEngine.Object.DontDestroyOnLoad(host);
             host.AddComponent<LoaderHost>();
+            _created = true;
         }
     }
 
@@ -57,7 +52,14 @@ namespace KeeperLoader.Runtime
             _log = new FileLogger(Path.Combine(_loaderDirectory, "logs", "latest.log"), "Core");
             _badgeVisibleUntil = Time.realtimeSinceStartup + 30f;
             _safeMode = string.Equals(Environment.GetEnvironmentVariable("KEEPERLOADER_SAFE_MODE"), "1");
-            _log.Info("KeeperLoader runtime 0.7.0 initialized for " +
+        }
+
+        private void Start()
+        {
+            // Unity calls Start on the next normal lifecycle pass. This keeps
+            // mod startup deferred until the engine is ready without relying
+            // on SceneManager events that older Graveyard Keeper builds lack.
+            _log.Info("KeeperLoader runtime 0.7.3 initialized for " +
                 Environment.GetEnvironmentVariable("KEEPERLOADER_GAME_ID") +
                 (_safeMode ? " in SAFE MODE." : "."));
             _catalog = new ModCatalog(_loaderDirectory, _log);
@@ -112,12 +114,56 @@ namespace KeeperLoader.Runtime
         private bool ShouldShowActivationBadge()
         {
             if (Time.realtimeSinceStartup <= _badgeVisibleUntil) return true;
-            string sceneName = SceneManager.GetActiveScene().name;
+            string sceneName = ActiveSceneName();
             if (string.IsNullOrEmpty(sceneName)) return false;
             return SceneNameContains(sceneName, "menu") ||
                    SceneNameContains(sceneName, "title") ||
                    SceneNameContains(sceneName, "frontend") ||
                    SceneNameContains(sceneName, "lobby");
+        }
+
+        private static string ActiveSceneName()
+        {
+            // Some Graveyard Keeper releases expose SceneManager without the
+            // sceneLoaded event used by newer Unity versions. Reflection keeps
+            // that optional API out of the runtime's hard assembly references.
+            try
+            {
+                Type sceneManager = Type.GetType(
+                    "UnityEngine.SceneManagement.SceneManager, UnityEngine.CoreModule", false) ??
+                    Type.GetType("UnityEngine.SceneManagement.SceneManager, UnityEngine", false);
+                if (sceneManager != null)
+                {
+                    MethodInfo getActiveScene = sceneManager.GetMethod("GetActiveScene",
+                        BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
+                    if (getActiveScene != null)
+                    {
+                        object scene = getActiveScene.Invoke(null, null);
+                        if (scene != null)
+                        {
+                            PropertyInfo name = scene.GetType().GetProperty("name",
+                                BindingFlags.Public | BindingFlags.Instance);
+                            if (name != null) return name.GetValue(scene, null) as string ?? string.Empty;
+                        }
+                    }
+                }
+
+                Type application = Type.GetType("UnityEngine.Application, UnityEngine.CoreModule", false) ??
+                                   Type.GetType("UnityEngine.Application, UnityEngine", false);
+                if (application != null)
+                {
+                    PropertyInfo legacyName = application.GetProperty("loadedLevelName",
+                        BindingFlags.Public | BindingFlags.Static);
+                    if (legacyName != null)
+                        return legacyName.GetValue(null, null) as string ?? string.Empty;
+                }
+            }
+            catch
+            {
+                // The scene name controls only the optional menu badge. Mod
+                // loading must never depend on a particular Unity scene API.
+            }
+            return string.Empty;
         }
 
         private static bool SceneNameContains(string sceneName, string value)

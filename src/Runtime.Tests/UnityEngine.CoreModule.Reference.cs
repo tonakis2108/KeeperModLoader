@@ -1,7 +1,5 @@
 // Compile-only Unity API facade for CI release builds.
 // This assembly is never distributed. Graveyard Keeper supplies the real assembly.
-using System;
-
 namespace UnityEngine
 {
     public class Object
@@ -42,21 +40,5 @@ namespace UnityEngine
     public static class Screen
     {
         public static int width { get { return 1920; } }
-    }
-}
-
-namespace UnityEngine.SceneManagement
-{
-    public struct Scene
-    {
-        public string name { get { return ""; } }
-    }
-
-    public enum LoadSceneMode { Single, Additive }
-
-    public static class SceneManager
-    {
-        public static event Action<Scene, LoadSceneMode> sceneLoaded;
-        public static Scene GetActiveScene() { return new Scene(); }
     }
 }
