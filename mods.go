@@ -52,17 +52,16 @@ func (m *InstalledMod) String() string {
 		status = "Enabled"
 	}
 	kind := ""
-	if m.Mode == externalPluginMode {
-		externalStatus := strings.TrimSpace(m.Status)
-		if externalStatus == "" {
-			externalStatus = "pending"
-		}
-		kind = "  [External: " + strings.Title(externalStatus) + "]"
+	if m.Mode == legacyExternalPluginMode {
+		kind = "  [Legacy external: Inactive]"
 	}
 	return fmt.Sprintf("[%s]%s  %s  |  %s  |  %s", status, kind, m.Name, m.Version, m.ID)
 }
 
-const modDisabledMarker = "keeperloader.disabled"
+const (
+	modDisabledMarker        = "keeperloader.disabled"
+	legacyExternalPluginMode = "external-unity-plugin"
+)
 
 func reservedModControlPath(name string) bool {
 	key := strings.ToLower(filepath.ToSlash(name))
@@ -109,8 +108,14 @@ func installedMods(game *GameInfo) ([]*InstalledMod, error) {
 				mod.Mode = manifest.EntryMode
 			}
 		}
-		if mod.Mode == externalPluginMode {
-			mod.Status = readExternalPluginStatus(game, mod.ID)
+		if strings.TrimSpace(mod.Mode) == "" {
+			mod.Mode = "native"
+		}
+		if mod.Mode == legacyExternalPluginMode {
+			// External plugin loading was removed in 0.6.2. Keep old packages visible
+			// so users can uninstall them, but never imply that they can still load.
+			mod.Enabled = false
+			mod.Status = "inactive"
 		}
 		result = append(result, mod)
 	}
@@ -226,6 +231,9 @@ func updateModPackage(game *GameInfo, current *InstalledMod, zipPath string) (*I
 	if current == nil || !modIDPattern.MatchString(current.ID) {
 		return nil, "", errors.New("select a valid installed mod first")
 	}
+	if strings.EqualFold(current.Mode, legacyExternalPluginMode) {
+		return nil, "", errors.New("external plugin support was removed; uninstall this inactive legacy package")
+	}
 	return installModPackageWithOptions(game, zipPath, modInstallOptions{
 		ExpectedID: current.ID, CurrentVersion: current.Version, RequireNewer: true,
 	})
@@ -273,6 +281,13 @@ func installModPackageWithOptions(game *GameInfo, zipPath string, options modIns
 	if _, err = parseVersion(manifest.Version); err != nil {
 		return nil, "", errors.New("mod package rejected: manifest version is invalid")
 	}
+	if manifest.EntryMode != "" && !strings.EqualFold(manifest.EntryMode, "native") {
+		if strings.EqualFold(manifest.EntryMode, legacyExternalPluginMode) {
+			return nil, "", errors.New("mod package rejected: experimental external plugins are no longer supported")
+		}
+		return nil, "", errors.New("mod package rejected: entryMode must be omitted or native")
+	}
+	manifest.EntryMode = "native"
 	if options.ExpectedID != "" && !strings.EqualFold(manifest.ID, options.ExpectedID) {
 		return nil, "", fmt.Errorf("mod update rejected: selected mod is %s but the package contains %s", options.ExpectedID, manifest.ID)
 	}
@@ -481,6 +496,9 @@ func setModEnabled(game *GameInfo, mod *InstalledMod, enabled bool) (string, err
 	if err := validateInstalledModPath(game, mod); err != nil {
 		return "", err
 	}
+	if enabled && strings.EqualFold(mod.Mode, legacyExternalPluginMode) {
+		return "", errors.New("external plugin support was removed; this legacy package remains inactive and can only be uninstalled")
+	}
 	marker := filepath.Join(mod.Path, modDisabledMarker)
 	if enabled {
 		if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
@@ -544,6 +562,9 @@ func restorePreviousMod(game *GameInfo, current *InstalledMod) (*InstalledMod, s
 	if err := validateInstalledModPath(game, current); err != nil {
 		return nil, "", err
 	}
+	if strings.EqualFold(current.Mode, legacyExternalPluginMode) {
+		return nil, "", errors.New("external plugin support was removed; uninstall this inactive legacy package")
+	}
 	keepDisabled := fileExists(filepath.Join(current.Path, modDisabledMarker))
 	loader := filepath.Join(game.GameDirectory, "KeeperLoader")
 	backupRoot := filepath.Join(loader, "backup", "mods")
@@ -570,7 +591,8 @@ func restorePreviousMod(game *GameInfo, current *InstalledMod) (*InstalledMod, s
 			continue
 		}
 		var manifest ModManifest
-		if json.Unmarshal(data, &manifest) != nil || !strings.EqualFold(manifest.ID, current.ID) {
+		if json.Unmarshal(data, &manifest) != nil || !strings.EqualFold(manifest.ID, current.ID) ||
+			strings.EqualFold(manifest.EntryMode, legacyExternalPluginMode) {
 			continue
 		}
 		info, infoErr := entry.Info()
@@ -602,12 +624,11 @@ func restorePreviousMod(game *GameInfo, current *InstalledMod) (*InstalledMod, s
 		_ = os.Rename(currentBackup, current.Path)
 		return nil, "", err
 	}
-	status := ""
-	if previous.manifest.EntryMode == externalPluginMode {
-		_ = writeExternalPluginStatus(game, previous.manifest.ID, "pending", "Restored package has not been tested in the game yet.")
-		status = "pending"
+	mode := previous.manifest.EntryMode
+	if strings.TrimSpace(mode) == "" {
+		mode = "native"
 	}
-	return &InstalledMod{ID: previous.manifest.ID, Name: previous.manifest.Name, Version: previous.manifest.Version, Path: current.Path, Enabled: !keepDisabled, Mode: previous.manifest.EntryMode, Status: status}, currentBackup, nil
+	return &InstalledMod{ID: previous.manifest.ID, Name: previous.manifest.Name, Version: previous.manifest.Version, Path: current.Path, Enabled: !keepDisabled, Mode: mode}, currentBackup, nil
 }
 
 func createModPackage(sourceFolder, modID, modName, version string, supportedGames []string, minimumVersion, outputZip string) error {

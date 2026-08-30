@@ -13,12 +13,17 @@ import (
 )
 
 func writeTestModPackage(t *testing.T, path, id, version, gameID string) {
+	writeTestModPackageWithEntryMode(t, path, id, version, gameID, "")
+}
+
+func writeTestModPackageWithEntryMode(t *testing.T, path, id, version, gameID, entryMode string) {
 	t.Helper()
 	payload := []byte("managed-dll-placeholder-" + id + "-" + version)
 	digest := sha256.Sum256(payload)
 	manifest := ModManifest{
-		ID: id, Name: "Test Mod", Version: version,
-		MinimumKeeperLoaderVersion: loaderVersion,
+		ID: id, Name: "Test Mod", Version: version, EntryMode: entryMode,
+		// Packages built for 0.6.1 must remain installable without modification.
+		MinimumKeeperLoaderVersion: "0.6.1",
 		UnityBackend:               "Mono", SupportedGames: []string{gameID},
 		Files: []ManifestFile{{Path: "Test.Mod.dll", SHA256: hex.EncodeToString(digest[:])}},
 	}
@@ -53,44 +58,7 @@ func writeTestModPackage(t *testing.T, path, id, version, gameID string) {
 	}
 }
 
-func writeTestExternalPackage(t *testing.T, path, name, version string, blocked bool) {
-	t.Helper()
-	output, err := os.Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	archive := zip.NewWriter(output)
-	metadata, _ := json.Marshal(map[string]string{"name": name, "version_number": version})
-	metadataWriter, err := archive.Create("manifest.json")
-	if err == nil {
-		_, err = metadataWriter.Write(metadata)
-	}
-	if err == nil {
-		pluginWriter, createErr := archive.Create("plugins/External.Plugin.dll")
-		err = createErr
-		if err == nil {
-			_, err = pluginWriter.Write([]byte("managed-external-plugin-placeholder"))
-		}
-	}
-	if err == nil && blocked {
-		blockedWriter, createErr := archive.Create("install.cmd")
-		err = createErr
-		if err == nil {
-			_, err = blockedWriter.Write([]byte("blocked"))
-		}
-	}
-	if closeErr := archive.Close(); err == nil {
-		err = closeErr
-	}
-	if closeErr := output.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestExternalPluginPackageIsManagedAndStatusSurvivesDisable(t *testing.T) {
+func TestNativeManifestCompatibilityAndLegacyExternalMigration(t *testing.T) {
 	root := t.TempDir()
 	game := &GameInfo{
 		GameDirectory: root, ExecutableName: "KeeperLoader-Test-Process.exe",
@@ -104,43 +72,70 @@ func TestExternalPluginPackageIsManagedAndStatusSurvivesDisable(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(loader, "state", "game.json"), record, 0644); err != nil {
 		t.Fatal(err)
 	}
-	packageOne := filepath.Join(t.TempDir(), "ExamplePlugin-1.0.0.zip")
-	writeTestExternalPackage(t, packageOne, "Example Plugin", "1.0.0", false)
-	installed, _, err := installExternalPluginPackage(game, packageOne)
+
+	legacyCompatible := filepath.Join(t.TempDir(), "native-omitted-entry-mode.zip")
+	writeTestModPackage(t, legacyCompatible, "example.native-omitted", "1.0.0", game.GameID)
+	installed, _, err := installModPackage(game, legacyCompatible)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if installed.ID != "external.example-plugin" || installed.Mode != externalPluginMode || installed.Status != "pending" {
-		t.Fatalf("unexpected external package identity: %#v", installed)
+	if installed.ID != "example.native-omitted" || installed.Mode != "native" || !installed.Enabled {
+		t.Fatalf("older native package compatibility changed: %#v", installed)
 	}
-	manifestData, err := os.ReadFile(filepath.Join(installed.Path, "keepermod.json"))
+
+	explicitNative := filepath.Join(t.TempDir(), "native-explicit-entry-mode.zip")
+	writeTestModPackageWithEntryMode(t, explicitNative, "example.native-explicit", "1.0.0", game.GameID, "native")
+	installedExplicit, _, err := installModPackage(game, explicitNative)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var manifest ModManifest
-	if json.Unmarshal(manifestData, &manifest) != nil || manifest.EntryMode != externalPluginMode || len(manifest.Files) != 2 {
-		t.Fatalf("unexpected generated external manifest: %#v", manifest)
+	if installedExplicit.Mode != "native" || !installedExplicit.Enabled {
+		t.Fatalf("explicit native entry mode was rejected: %#v", installedExplicit)
 	}
-	if _, err = setModEnabled(game, installed, false); err != nil {
+
+	externalPackage := filepath.Join(t.TempDir(), "retired-external-entry-mode.zip")
+	writeTestModPackageWithEntryMode(t, externalPackage, "external.retired", "1.0.0", game.GameID, legacyExternalPluginMode)
+	if _, _, err = installModPackage(game, externalPackage); err == nil {
+		t.Fatal("retired external entry mode was accepted")
+	}
+
+	legacyID := "external.legacy-package"
+	legacyPath := filepath.Join(loader, "mods", legacyID)
+	if err = os.MkdirAll(legacyPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	legacyManifest, _ := json.Marshal(ModManifest{
+		ID: legacyID, Name: "Legacy External Package", Version: "1.0.0",
+		EntryMode: legacyExternalPluginMode,
+	})
+	if err = os.WriteFile(filepath.Join(legacyPath, "keepermod.json"), legacyManifest, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(legacyPath, "External.Plugin.dll"), []byte("legacy"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	listed, err := installedMods(game)
-	if err != nil || len(listed) != 1 || listed[0].Enabled || listed[0].Mode != externalPluginMode || listed[0].Status != "pending" {
-		t.Fatalf("external package was not listed correctly: %#v, %v", listed, err)
-	}
-	packageTwo := filepath.Join(t.TempDir(), "ExamplePlugin-1.1.0.zip")
-	writeTestExternalPackage(t, packageTwo, "Example Plugin", "1.1.0", false)
-	updated, backup, err := updateExternalPluginPackage(game, listed[0], packageTwo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Enabled || updated.Version != "1.1.0" || backup == "" || !dirExists(backup) {
-		t.Fatalf("external package update did not preserve status: %#v, backup=%s", updated, backup)
+	var legacy *InstalledMod
+	for _, candidate := range listed {
+		if candidate.ID == legacyID {
+			legacy = candidate
+			break
+		}
 	}
-	blocked := filepath.Join(t.TempDir(), "BlockedPlugin-1.0.0.zip")
-	writeTestExternalPackage(t, blocked, "Blocked Plugin", "1.0.0", true)
-	if _, _, err = installExternalPluginPackage(game, blocked); err == nil {
-		t.Fatal("external package containing a blocked script was accepted")
+	if legacy == nil || legacy.Enabled || legacy.Mode != legacyExternalPluginMode || legacy.Status != "inactive" {
+		t.Fatalf("legacy external package was not retained as inactive: %#v", legacy)
+	}
+	if _, err = setModEnabled(game, legacy, true); err == nil {
+		t.Fatal("legacy external package could be re-enabled")
+	}
+	if _, err = uninstallMod(game, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if dirExists(legacyPath) {
+		t.Fatal("legacy external package could not be uninstalled")
 	}
 }
 
