@@ -94,7 +94,7 @@ With the optional manager:
 
 ## Installing and updating native mods
 
-Existing compiled native KeeperLoader mods do not need source or API changes for 0.7.2. The public `KeeperLoader.API` source is byte-for-byte unchanged from 0.6.2, and CI rejects the release if that compatibility boundary changes. Legacy ZIPs that contain C# source but no DLL must be converted once on the publisher/build side; KeeperLoader deliberately does not invoke a compiler on a player's PC. A transitional ZIP may retain its source and legacy `build` metadata when the declared, hashed output DLL is also included.
+Existing compiled native KeeperLoader mods do not need source or API changes for 0.7.2. The public `KeeperLoader.API` source is byte-for-byte unchanged from 0.6.2, and CI rejects the release if that compatibility boundary changes. Legacy ZIPs that contain C# source but no DLL must be converted once on the publisher/build side; KeeperLoader deliberately does not invoke a compiler on a player's PC. The repository converter produces a precompiled package compatible with the released v0.7.2 manager. Future managers also accept a transitional ZIP that retains legacy `build` metadata when the declared, hashed output DLL is included.
 
 Using the optional manager:
 

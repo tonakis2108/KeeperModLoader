@@ -46,6 +46,9 @@ public sealed class LegacyConverterTest : KeeperMod
         throw "Converted package is missing its compiled DLL"
     }
     $convertedManifest = Get-Content (Join-Path $expanded "keepermod.json") -Raw | ConvertFrom-Json
+    if ($null -ne $convertedManifest.build) {
+        throw "Converted manifest still asks the player's manager to compile source"
+    }
     $entry = $convertedManifest.files | Where-Object { $_.path -eq "Legacy.Converter.Test.dll" } | Select-Object -First 1
     if ($null -eq $entry) { throw "Converted manifest does not declare the compiled DLL" }
     $compiledDigest = (Get-FileHash -LiteralPath $compiled -Algorithm SHA256).Hash.ToLowerInvariant()
