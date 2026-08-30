@@ -71,7 +71,6 @@ func reservedModControlPath(name string) bool {
 var (
 	modIDPattern       = regexp.MustCompile(`^[A-Za-z0-9._-]{1,80}$`)
 	gameIDPattern      = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
-	buildOutputPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+\.dll$`)
 	sha256Pattern      = regexp.MustCompile(`^[a-fA-F0-9]{64}$`)
 	blockedExtensions  = map[string]bool{
 		".exe": true, ".com": true, ".bat": true, ".cmd": true, ".ps1": true,
@@ -368,8 +367,11 @@ func installModPackageWithOptions(game *GameInfo, zipPath string, options modIns
 			hasDLL = true
 		}
 	}
-	if !hasDLL && manifest.Build == nil {
-		return nil, "", errors.New("mod package rejected: package contains neither a DLL nor source build specification")
+	if manifest.Build != nil {
+		return nil, "", errors.New("mod package rejected: source-build packages are no longer compiled on the player's PC; distribute a precompiled native KeeperLoader DLL")
+	}
+	if !hasDLL {
+		return nil, "", errors.New("mod package rejected: package contains no precompiled DLL")
 	}
 	if len(archiveFiles)-1 != len(declared) {
 		return nil, "", errors.New("mod package rejected: ZIP contains undeclared payload files")
@@ -380,21 +382,6 @@ func installModPackageWithOptions(game *GameInfo, zipPath string, options modIns
 		}
 		if _, present := declared[key]; !present {
 			return nil, "", fmt.Errorf("mod package rejected: undeclared file %q is present", key)
-		}
-	}
-
-	if manifest.Build != nil {
-		if len(manifest.Build.Sources) == 0 || !buildOutputPattern.MatchString(manifest.Build.Output) {
-			return nil, "", errors.New("mod package rejected: source build specification is invalid")
-		}
-		for _, source := range manifest.Build.Sources {
-			name, pathErr := normalizedArchivePath(source)
-			if pathErr != nil || !strings.EqualFold(filepath.Ext(name), ".cs") {
-				return nil, "", fmt.Errorf("mod package rejected: invalid build source %q", source)
-			}
-			if _, present := declared[strings.ToLower(name)]; !present {
-				return nil, "", fmt.Errorf("mod package rejected: build source %q is not in the verified file list", source)
-			}
 		}
 	}
 
@@ -424,24 +411,6 @@ func installModPackageWithOptions(game *GameInfo, zipPath string, options modIns
 		return nil, "", err
 	}
 
-	if manifest.Build != nil {
-		compiler, compilerErr := findCSharpCompiler()
-		if compilerErr != nil {
-			return nil, "", compilerErr
-		}
-		references, refErr := unityReferences(game.ManagedDirectory)
-		if refErr != nil {
-			return nil, "", refErr
-		}
-		references = append([]string{filepath.Join(loader, "core", "KeeperLoader.API.dll")}, references...)
-		var sources []string
-		for _, source := range manifest.Build.Sources {
-			sources = append(sources, filepath.Join(staging, filepath.FromSlash(source)))
-		}
-		if err = runCompiler(compiler, filepath.Join(staging, manifest.Build.Output), sources, references); err != nil {
-			return nil, "", err
-		}
-	}
 	activation := fmt.Sprintf("game_id=%s\r\nbackend=Mono\r\ncompatibility=explicit-game-id\r\nentry_mode=native\r\nmod_id=%s\r\npackage_version=%s\r\nkeeperloader_version=%s\r\n", game.GameID, manifest.ID, manifest.Version, loaderVersion)
 	if err = os.WriteFile(filepath.Join(staging, "keeperloader.activation"), []byte(activation), 0644); err != nil {
 		return nil, "", err

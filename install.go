@@ -1,28 +1,28 @@
 package main
 
 import (
-	"archive/zip"
-	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
 
 const (
-	doorstopURL    = "https://github.com/NeighTools/UnityDoorstop/releases/download/v4.5.0/doorstop_win_release_4.5.0.zip"
-	doorstopSHA256 = "7bb953e8d883c8bde76ced96f6d0e45660ad6e0151880d8ab5856bf4f532b147"
-	safeModeMarker = "safe-mode.next"
+	runtimePayloadDirectory = "runtime"
+	safeModeMarker          = "safe-mode.next"
 )
 
-//go:embed src/API/KeeperLoaderApi.cs src/Bootstrap/Entrypoint.cs src/Runtime/*.cs
-var runtimeSources embed.FS
+var requiredRuntimePayloadFiles = []string{
+	"KeeperLoader/core/KeeperLoader.API.dll",
+	"KeeperLoader/core/KeeperLoader.Bootstrap.dll",
+	"KeeperLoader/core/KeeperLoader.Runtime.dll",
+	"KeeperLoader/state/game.json",
+	"doorstop_config.ini",
+	"winhttp.dll",
+}
 
 func loaderBootstrapActive(game *GameInfo) bool {
 	config := filepath.Join(game.GameDirectory, "doorstop_config.ini")
@@ -107,140 +107,63 @@ func activateCoreUpdate(loader string, builtFiles [][2]string) (string, func(), 
 	return backup, rollback, nil
 }
 
-func extractEmbeddedSources(destination string) (map[string]string, error) {
-	paths := []string{
-		"src/API/KeeperLoaderApi.cs",
-		"src/Bootstrap/Entrypoint.cs",
-		"src/Runtime/RuntimeHost.cs",
-		"src/Runtime/FileLogger.cs",
-		"src/Runtime/ModCatalog.cs",
-	}
-	result := make(map[string]string, len(paths))
-	for _, path := range paths {
-		data, err := runtimeSources.ReadFile(path)
-		if err != nil {
-			return nil, err
-		}
-		output := filepath.Join(destination, filepath.Base(path))
-		if err = os.WriteFile(output, data, 0644); err != nil {
-			return nil, err
-		}
-		result[filepath.Base(path)] = output
-	}
-	return result, nil
-}
-
-func unityReferences(managedDirectory string) ([]string, error) {
-	references, err := filepath.Glob(filepath.Join(managedDirectory, "UnityEngine*.dll"))
-	if err != nil || len(references) == 0 {
-		return nil, errors.New("no UnityEngine assemblies were found in the game's Managed folder")
-	}
-	sort.Strings(references)
-	return references, nil
-}
-
-func cachedDoorstopArchive() (string, error) {
-	cacheBase := os.Getenv("LOCALAPPDATA")
-	if cacheBase == "" {
-		cacheBase = os.TempDir()
-	}
-	cache := filepath.Join(cacheBase, "KeeperLoader", "cache")
-	if err := os.MkdirAll(cache, 0755); err != nil {
-		return "", err
-	}
-	archivePath := filepath.Join(cache, "doorstop_win_release_4.5.0.zip")
-	if fileExists(archivePath) {
-		if digest, err := fileSHA256(archivePath); err == nil && strings.EqualFold(digest, doorstopSHA256) {
-			return archivePath, nil
-		}
-		_ = os.Remove(archivePath)
-	}
-
-	client := &http.Client{Timeout: 90 * time.Second}
-	request, _ := http.NewRequest(http.MethodGet, doorstopURL, nil)
-	request.Header.Set("User-Agent", "KeeperLoader-Manager/"+loaderVersion)
-	response, err := client.Do(request)
-	if err != nil {
-		return "", fmt.Errorf("could not download the UnityDoorstop bootstrap: %w", err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return "", fmt.Errorf("UnityDoorstop download returned HTTP %s", response.Status)
-	}
-	temporary := archivePath + ".download"
-	out, err := os.Create(temporary)
+func runtimePayloadRoot() (string, error) {
+	executable, err := os.Executable()
 	if err != nil {
 		return "", err
 	}
-	_, copyErr := io.Copy(out, io.LimitReader(response.Body, 32*1024*1024))
-	closeErr := out.Close()
-	if copyErr != nil {
-		_ = os.Remove(temporary)
-		return "", copyErr
-	}
-	if closeErr != nil {
-		_ = os.Remove(temporary)
-		return "", closeErr
-	}
-	digest, err := fileSHA256(temporary)
-	if err != nil || !strings.EqualFold(digest, doorstopSHA256) {
-		_ = os.Remove(temporary)
-		return "", errors.New("UnityDoorstop download failed its pinned SHA-256 integrity check")
-	}
-	_ = os.Remove(archivePath)
-	if err = os.Rename(temporary, archivePath); err != nil {
-		return "", err
-	}
-	return archivePath, nil
+	return filepath.Join(filepath.Dir(executable), runtimePayloadDirectory), nil
 }
 
-func doorstopProxy(archivePath, architecture, temporary string) (string, error) {
-	reader, err := zip.OpenReader(archivePath)
+func validateRuntimePayload(root string) error {
+	checksumPath := filepath.Join(root, "SHA256SUMS.txt")
+	data, err := os.ReadFile(checksumPath)
 	if err != nil {
-		return "", err
+		return errors.New("the manager runtime payload is missing; extract the complete KeeperLoader Manager ZIP before running it")
 	}
-	defer reader.Close()
-	architectureMarkers := []string{"x64", "win64"}
-	if architecture == "x86" {
-		architectureMarkers = []string{"x86", "win32"}
-	}
-	for _, file := range reader.File {
-		lower := strings.ToLower(strings.ReplaceAll(file.Name, `\`, "/"))
-		if filepath.Base(lower) != "winhttp.dll" {
+	expected := map[string]string{}
+	for _, line := range strings.Split(strings.ReplaceAll(string(data), "\r", ""), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || !sha256Pattern.MatchString(fields[0]) {
 			continue
 		}
-		matched := false
-		for _, marker := range architectureMarkers {
-			if strings.Contains(lower, marker) {
-				matched = true
-				break
-			}
+		name := strings.TrimPrefix(fields[len(fields)-1], "*")
+		name = strings.ReplaceAll(name, `\`, "/")
+		clean, pathErr := normalizedArchivePath(name)
+		if pathErr != nil {
+			return fmt.Errorf("runtime payload checksum path rejected: %w", pathErr)
 		}
-		if !matched {
-			continue
+		extension := strings.ToLower(filepath.Ext(clean))
+		switch extension {
+		case ".exe", ".msi", ".bat", ".cmd", ".ps1", ".vbs", ".js":
+			return fmt.Errorf("runtime payload contains blocked file type %q", extension)
 		}
-		input, openErr := file.Open()
-		if openErr != nil {
-			return "", openErr
-		}
-		outputPath := filepath.Join(temporary, "winhttp.dll")
-		output, createErr := os.Create(outputPath)
-		if createErr != nil {
-			input.Close()
-			return "", createErr
-		}
-		_, copyErr := io.Copy(output, input)
-		input.Close()
-		closeErr := output.Close()
-		if copyErr != nil {
-			return "", copyErr
-		}
-		if closeErr != nil {
-			return "", closeErr
-		}
-		return outputPath, nil
+		expected[clean] = strings.ToLower(fields[0])
 	}
-	return "", fmt.Errorf("the official UnityDoorstop archive did not contain a %s winhttp.dll", architecture)
+	for _, required := range requiredRuntimePayloadFiles {
+		if _, ok := expected[required]; !ok {
+			return fmt.Errorf("runtime payload checksum is missing %s", required)
+		}
+	}
+	for name, digest := range expected {
+		actual, hashErr := fileSHA256(filepath.Join(root, filepath.FromSlash(name)))
+		if hashErr != nil || !strings.EqualFold(actual, digest) {
+			return fmt.Errorf("runtime payload integrity check failed for %s", name)
+		}
+	}
+	gameRecord, err := os.ReadFile(filepath.Join(root, "KeeperLoader", "state", "game.json"))
+	if err != nil {
+		return err
+	}
+	var record struct {
+		GameID              string `json:"gameId"`
+		Architecture        string `json:"architecture"`
+		KeeperLoaderVersion string `json:"keeperLoaderVersion"`
+	}
+	if json.Unmarshal(gameRecord, &record) != nil || record.GameID != graveyardKeeperGameID || record.Architecture != "x64" || record.KeeperLoaderVersion != loaderVersion {
+		return errors.New("runtime payload metadata does not match this KeeperLoader Manager version")
+	}
+	return nil
 }
 
 func enableLoader(game *GameInfo) (string, error) {
@@ -250,45 +173,21 @@ func enableLoader(game *GameInfo) (string, error) {
 	if err := assertGameStopped(game); err != nil {
 		return "", err
 	}
-	compiler, err := findCSharpCompiler()
+	if game.Architecture != "x64" {
+		return "", errors.New("KeeperLoader currently supports only the x64 Steam build of Graveyard Keeper")
+	}
+	payload, err := runtimePayloadRoot()
 	if err != nil {
 		return "", err
 	}
-	references, err := unityReferences(game.ManagedDirectory)
-	if err != nil {
+	if err = validateRuntimePayload(payload); err != nil {
 		return "", err
 	}
-	temporary, err := os.MkdirTemp("", "KeeperLoader-build-")
-	if err != nil {
-		return "", err
-	}
-	defer os.RemoveAll(temporary)
-	sources, err := extractEmbeddedSources(temporary)
-	if err != nil {
-		return "", err
-	}
-	apiBuild := filepath.Join(temporary, "KeeperLoader.API.dll")
-	bootstrapBuild := filepath.Join(temporary, "KeeperLoader.Bootstrap.dll")
-	runtimeBuild := filepath.Join(temporary, "KeeperLoader.Runtime.dll")
-	if err = runCompiler(compiler, apiBuild, []string{sources["KeeperLoaderApi.cs"]}, nil); err != nil {
-		return "", err
-	}
-	if err = runCompiler(compiler, bootstrapBuild, []string{sources["Entrypoint.cs"]}, nil); err != nil {
-		return "", err
-	}
-	runtimeSourceList := []string{sources["RuntimeHost.cs"], sources["FileLogger.cs"], sources["ModCatalog.cs"]}
-	if err = runCompiler(compiler, runtimeBuild, runtimeSourceList, append([]string{apiBuild}, references...)); err != nil {
-		return "", err
-	}
-
-	archive, err := cachedDoorstopArchive()
-	if err != nil {
-		return "", err
-	}
-	proxy, err := doorstopProxy(archive, game.Architecture, temporary)
-	if err != nil {
-		return "", err
-	}
+	apiBuild := filepath.Join(payload, "KeeperLoader", "core", "KeeperLoader.API.dll")
+	bootstrapBuild := filepath.Join(payload, "KeeperLoader", "core", "KeeperLoader.Bootstrap.dll")
+	runtimeBuild := filepath.Join(payload, "KeeperLoader", "core", "KeeperLoader.Runtime.dll")
+	proxy := filepath.Join(payload, "winhttp.dll")
+	configSource := filepath.Join(payload, "doorstop_config.ini")
 
 	loader := filepath.Join(game.GameDirectory, "KeeperLoader")
 	for _, directory := range []string{loader, filepath.Join(loader, "mods"), filepath.Join(loader, "config"), filepath.Join(loader, "logs"), filepath.Join(loader, "state")} {
@@ -340,8 +239,11 @@ func enableLoader(game *GameInfo) (string, error) {
 	if err = copyFile(proxy, filepath.Join(game.GameDirectory, "winhttp.dll")); err != nil {
 		return "", err
 	}
-	config := "[General]\r\nenabled=true\r\ntarget_assembly=KeeperLoader\\core\\KeeperLoader.Bootstrap.dll\r\nredirect_output_log=false\r\nboot_config_override=\r\nignore_disable_switch=false\r\n\r\n[UnityMono]\r\ndll_search_path_override=\r\ndebug_enabled=false\r\ndebug_address=127.0.0.1:10000\r\ndebug_suspend=false\r\n\r\n[Il2Cpp]\r\ncoreclr_path=\r\ncorlib_dir=\r\n"
-	if err = writeAtomic(currentConfig, []byte(config), 0644); err != nil {
+	config, err := os.ReadFile(configSource)
+	if err != nil {
+		return "", err
+	}
+	if err = writeAtomic(currentConfig, config, 0644); err != nil {
 		return "", err
 	}
 	record := struct {

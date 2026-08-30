@@ -69,6 +69,28 @@ jobs:
         shell: pwsh
         run: ./scripts/package-manager.ps1
 
+      - name: Verify easy-install and mod-management release contract
+        shell: pwsh
+        run: |
+          $managerSource = (Get-Content install.go -Raw) + (Get-Content mods.go -Raw)
+          foreach ($forbidden in @('net/http', 'go:embed src/', 'findCSharpCompiler', 'runCompiler')) {
+            if ($managerSource.Contains($forbidden)) { throw "Manager still contains forbidden on-device downloader/compiler behavior: $forbidden" }
+          }
+          $ui = Get-Content main.go -Raw
+          foreach ($required in @('Install / update KeeperLoader', 'Install Mod ZIP', 'Update selected from ZIP', 'Enable / disable selected', 'Restore previous', 'Uninstall selected')) {
+            if (-not $ui.Contains($required)) { throw "Required manager operation is missing: $required" }
+          }
+          foreach ($required in @(
+            'manager-package/runtime/winhttp.dll',
+            'manager-package/runtime/doorstop_config.ini',
+            'manager-package/runtime/KeeperLoader/core/KeeperLoader.API.dll',
+            'manager-package/runtime/KeeperLoader/core/KeeperLoader.Bootstrap.dll',
+            'manager-package/runtime/KeeperLoader/core/KeeperLoader.Runtime.dll',
+            'manager-package/runtime/SHA256SUMS.txt'
+          )) {
+            if (-not (Test-Path $required)) { throw "Manager package is missing bundled runtime file: $required" }
+          }
+
       - name: Scan release payloads with Microsoft Defender when available
         shell: pwsh
         run: |

@@ -3,10 +3,51 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestValidateRuntimePayloadAcceptsCompleteMatchingPayload(t *testing.T) {
+	root := t.TempDir()
+	contents := map[string][]byte{
+		"KeeperLoader/core/KeeperLoader.API.dll":       []byte("api"),
+		"KeeperLoader/core/KeeperLoader.Bootstrap.dll": []byte("bootstrap"),
+		"KeeperLoader/core/KeeperLoader.Runtime.dll":   []byte("runtime"),
+		"KeeperLoader/state/game.json": []byte(fmt.Sprintf(`{"gameId":"%s","architecture":"x64","keeperLoaderVersion":"%s"}`, graveyardKeeperGameID, loaderVersion)),
+		"doorstop_config.ini": []byte("[General]\ntarget_assembly=KeeperLoader\\core\\KeeperLoader.Bootstrap.dll\n"),
+		"winhttp.dll":         []byte("proxy"),
+	}
+	var checksums []string
+	for name, data := range contents {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0644); err != nil {
+			t.Fatal(err)
+		}
+		digest, err := fileSHA256(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checksums = append(checksums, digest+"  "+name)
+	}
+	if err := os.WriteFile(filepath.Join(root, "SHA256SUMS.txt"), []byte(strings.Join(checksums, "\n")+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateRuntimePayload(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "winhttp.dll"), []byte("changed"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateRuntimePayload(root); err == nil {
+		t.Fatal("tampered runtime payload was accepted")
+	}
+}
 
 func TestActivateCoreUpdateRollsBack(t *testing.T) {
 	loader := filepath.Join(t.TempDir(), "KeeperLoader")
