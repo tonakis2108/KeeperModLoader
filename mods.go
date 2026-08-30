@@ -71,6 +71,7 @@ func reservedModControlPath(name string) bool {
 var (
 	modIDPattern       = regexp.MustCompile(`^[A-Za-z0-9._-]{1,80}$`)
 	gameIDPattern      = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+	buildOutputPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+\.dll$`)
 	sha256Pattern      = regexp.MustCompile(`^[a-fA-F0-9]{64}$`)
 	blockedExtensions  = map[string]bool{
 		".exe": true, ".com": true, ".bat": true, ".cmd": true, ".ps1": true,
@@ -367,11 +368,31 @@ func installModPackageWithOptions(game *GameInfo, zipPath string, options modIns
 			hasDLL = true
 		}
 	}
-	if manifest.Build != nil {
-		return nil, "", errors.New("mod package rejected: source-build packages are no longer compiled on the player's PC; distribute a precompiled native KeeperLoader DLL")
-	}
 	if !hasDLL {
+		if manifest.Build != nil {
+			return nil, "", errors.New("legacy source-only package detected: this ZIP has no compiled DLL. KeeperLoader no longer runs a compiler on players' PCs. Download or create the precompiled release of this mod; its mod ID and source code do not need to change")
+		}
 		return nil, "", errors.New("mod package rejected: package contains no precompiled DLL")
+	}
+	if manifest.Build != nil {
+		// Source-era packages may retain their build metadata and source for
+		// transparency. Accept them when the publisher also supplies and hashes
+		// the requested output DLL. Never invoke a compiler on the player's PC.
+		if len(manifest.Build.Sources) == 0 || !buildOutputPattern.MatchString(manifest.Build.Output) {
+			return nil, "", errors.New("mod package rejected: legacy build specification is invalid")
+		}
+		for _, source := range manifest.Build.Sources {
+			name, pathErr := normalizedArchivePath(source)
+			if pathErr != nil || !strings.EqualFold(filepath.Ext(name), ".cs") {
+				return nil, "", fmt.Errorf("mod package rejected: invalid legacy build source %q", source)
+			}
+			if _, present := declared[strings.ToLower(name)]; !present {
+				return nil, "", fmt.Errorf("mod package rejected: legacy build source %q is not in the verified file list", source)
+			}
+		}
+		if _, present := declared[strings.ToLower(manifest.Build.Output)]; !present {
+			return nil, "", fmt.Errorf("legacy source-only package detected: compiled output %q is missing. Download or create the precompiled release of this mod", manifest.Build.Output)
+		}
 	}
 	if len(archiveFiles)-1 != len(declared) {
 		return nil, "", errors.New("mod package rejected: ZIP contains undeclared payload files")

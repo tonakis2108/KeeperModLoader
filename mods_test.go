@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -55,6 +56,101 @@ func writeTestModPackageWithEntryMode(t *testing.T, path, id, version, gameID, e
 	}
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func writeLegacyBuildModPackage(t *testing.T, path, id, version, gameID string, includeCompiledDLL bool) {
+	t.Helper()
+	sourceName := "src/LegacyMod.cs"
+	outputName := "Legacy.Mod.dll"
+	source := []byte("public sealed class LegacyMod { }")
+	sourceDigest := sha256.Sum256(source)
+	manifest := ModManifest{
+		ID: id, Name: "Legacy Build Mod", Version: version,
+		MinimumKeeperLoaderVersion: "0.6.1", UnityBackend: "Mono", SupportedGames: []string{gameID},
+		Files: []ManifestFile{{Path: sourceName, SHA256: hex.EncodeToString(sourceDigest[:])}},
+		Build: &BuildSpec{Sources: []string{sourceName}, Output: outputName},
+	}
+	payloads := map[string][]byte{sourceName: source}
+	if includeCompiledDLL {
+		compiled := []byte("precompiled-managed-dll-placeholder-" + id + "-" + version)
+		compiledDigest := sha256.Sum256(compiled)
+		manifest.Files = append(manifest.Files, ManifestFile{Path: outputName, SHA256: hex.EncodeToString(compiledDigest[:])})
+		payloads[outputName] = compiled
+	}
+	manifestData, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive := zip.NewWriter(output)
+	manifestWriter, err := archive.Create("keepermod.json")
+	if err == nil {
+		_, err = manifestWriter.Write(manifestData)
+	}
+	for name, payload := range payloads {
+		if err != nil {
+			break
+		}
+		var writer interface{ Write([]byte) (int, error) }
+		writer, err = archive.Create(name)
+		if err == nil {
+			_, err = writer.Write(payload)
+		}
+	}
+	if closeErr := archive.Close(); err == nil {
+		err = closeErr
+	}
+	if closeErr := output.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLegacySourcePackagesRequirePublisherCompilationButHybridUpdatesRemainCompatible(t *testing.T) {
+	root := t.TempDir()
+	game := &GameInfo{
+		GameDirectory: root, ExecutableName: "KeeperLoader-Test-Process.exe",
+		GameID: "test-game", Backend: "Mono", Architecture: "x64", Supported: true,
+	}
+	loader := filepath.Join(root, "KeeperLoader")
+	if err := os.MkdirAll(filepath.Join(loader, "state"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	record, _ := json.Marshal(map[string]string{"gameId": game.GameID, "keeperLoaderVersion": loaderVersion})
+	if err := os.WriteFile(filepath.Join(loader, "state", "game.json"), record, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	legacySourceOnly := filepath.Join(t.TempDir(), "legacy-source-only.zip")
+	writeLegacyBuildModPackage(t, legacySourceOnly, "example.legacy", "1.0.0", game.GameID, false)
+	if _, _, err := installModPackage(game, legacySourceOnly); err == nil || !strings.Contains(err.Error(), "legacy source-only package detected") {
+		t.Fatalf("source-only legacy package did not receive the migration error: %v", err)
+	}
+
+	installedPackage := filepath.Join(t.TempDir(), "legacy-precompiled-1.0.0.zip")
+	writeLegacyBuildModPackage(t, installedPackage, "example.legacy", "1.0.0", game.GameID, true)
+	installed, _, err := installModPackage(game, installedPackage)
+	if err != nil {
+		t.Fatalf("precompiled package retaining legacy metadata was rejected: %v", err)
+	}
+	if _, err = setModEnabled(game, installed, false); err != nil {
+		t.Fatal(err)
+	}
+
+	updatePackage := filepath.Join(t.TempDir(), "legacy-precompiled-1.1.0.zip")
+	writeLegacyBuildModPackage(t, updatePackage, installed.ID, "1.1.0", game.GameID, true)
+	updated, backup, err := updateModPackage(game, installed, updatePackage)
+	if err != nil {
+		t.Fatalf("legacy-format precompiled update was rejected: %v", err)
+	}
+	if updated.Version != "1.1.0" || updated.Enabled || backup == "" || !dirExists(backup) {
+		t.Fatalf("legacy update did not preserve normal update behavior: %#v, backup=%q", updated, backup)
 	}
 }
 
