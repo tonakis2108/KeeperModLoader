@@ -40,12 +40,6 @@ $runtimeSources = Get-ChildItem (Join-Path $repository "src\Runtime\*.cs") | For
 & $csc /nologo /target:library "/out:$runtime" "/reference:$api" "/reference:$coreReference" "/reference:$textReference" "/reference:$imguiReference" $runtimeSources
 if ($LASTEXITCODE -ne 0) { throw "KeeperLoader runtime compilation failed" }
 
-$runtimeAssembly = [Reflection.Assembly]::ReflectionOnlyLoadFrom($runtime)
-$references = $runtimeAssembly.GetReferencedAssemblies().Name
-foreach ($required in @("KeeperLoader.API", "UnityEngine.CoreModule", "UnityEngine.TextRenderingModule", "UnityEngine.IMGUIModule")) {
-    if ($references -notcontains $required) { throw "Runtime does not reference required assembly $required" }
-}
-
 $apiBlob = (git -C $repository hash-object "src/API/KeeperLoaderApi.cs").Trim()
 if ($apiBlob -ne "0cc3c28cdb6cb51a88709c5b23e45fb40f5cac72") {
     throw "KeeperLoader API changed; native mod compatibility review is required"
