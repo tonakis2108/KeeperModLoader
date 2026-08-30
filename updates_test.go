@@ -2,18 +2,25 @@
 
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
-func TestChecksumForManager(t *testing.T) {
+func TestManagerPackageChecksumsRequireManagerAndRuntime(t *testing.T) {
 	digest := "29b477c57793d3f464988edbc8a0f27f9b5d77acb7c9f97c0d2605f8ca7ebf62"
-	value, err := checksumForManager(digest + "  KeeperLoader-Manager.exe\r\n")
+	lines := []string{digest + "  KeeperLoader-Manager.exe"}
+	for _, name := range requiredRuntimePayloadFiles {
+		lines = append(lines, digest+"  runtime/"+name)
+	}
+	value, err := managerPackageChecksums(strings.Join(lines, "\r\n") + "\r\n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value != digest {
-		t.Fatalf("expected %s, got %s", digest, value)
+	if value[strings.ToLower(managerExecutableName)] != digest {
+		t.Fatalf("expected manager digest %s", digest)
 	}
-	if _, err = checksumForManager("not-a-checksum  KeeperLoader-Manager.exe\n"); err == nil {
+	if _, err = managerPackageChecksums("not-a-checksum  KeeperLoader-Manager.exe\n"); err == nil {
 		t.Fatal("invalid checksum was accepted")
 	}
 }

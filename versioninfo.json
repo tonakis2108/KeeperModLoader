@@ -3,13 +3,13 @@
     "FileVersion": {
       "Major": 0,
       "Minor": 7,
-      "Patch": 0,
+      "Patch": 1,
       "Build": 0
     },
     "ProductVersion": {
       "Major": 0,
       "Minor": 7,
-      "Patch": 0,
+      "Patch": 1,
       "Build": 0
     },
     "FileFlagsMask": "3f",
@@ -22,14 +22,14 @@
     "Comments": "Open-source KeeperLoader manager for Graveyard Keeper native mods.",
     "CompanyName": "tonakis2108",
     "FileDescription": "KeeperLoader Manager for Graveyard Keeper",
-    "FileVersion": "0.7.0.0",
+    "FileVersion": "0.7.1.0",
     "InternalName": "KeeperLoader-Manager",
     "LegalCopyright": "Copyright 2026 tonakis2108. Licensed under LGPL-2.1-or-later.",
     "LegalTrademarks": "",
     "OriginalFilename": "KeeperLoader-Manager.exe",
     "PrivateBuild": "",
     "ProductName": "KeeperLoader",
-    "ProductVersion": "0.7.0",
+    "ProductVersion": "0.7.1",
     "SpecialBuild": ""
   },
   "VarFileInfo": {

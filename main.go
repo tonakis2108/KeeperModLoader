@@ -75,7 +75,7 @@ func main() {
 			Composite{Layout: HBox{MarginsZero: true, Spacing: 7}, Children: []Widget{
 				HSpacer{},
 				PushButton{AssignTo: &launchButton, Text: "Launch through Steam", OnClicked: func() { app.launchSelected() }},
-				PushButton{AssignTo: &enableButton, Text: "Enable / update selected", OnClicked: func() { app.enableSelected() }},
+				PushButton{AssignTo: &enableButton, Text: "Install / update KeeperLoader", MinSize: Size{Width: 205}, OnClicked: func() { app.enableSelected() }},
 				PushButton{AssignTo: &disableButton, Text: "Remove selected", OnClicked: func() { app.disableSelected() }},
 				PushButton{AssignTo: &manageButton, Text: "Manage mods…", OnClicked: func() { app.manageSelected() }},
 				PushButton{AssignTo: &savesButton, Text: "Open saves", OnClicked: func() { app.openSaves() }},
@@ -154,19 +154,24 @@ func (app *application) scanSteam() {
 	go func() {
 		games, err := scanSteamGames()
 		app.mw.Synchronize(func() {
-			defer app.setBusy(false, "Ready.")
 			if err != nil {
 				app.appendLog("Scan failed: " + err.Error())
+				app.setBusy(false, "Steam scan failed.")
 				return
 			}
 			app.model.reset(mergeGames(app.model.items, games))
+			if len(app.model.items) == 1 {
+				app.list.SetCurrentIndex(0)
+			}
 			if saveErr := saveRememberedGames(app.model.items); saveErr != nil {
 				app.appendLog("Could not remember game locations: " + saveErr.Error())
 			}
 			if len(games) == 0 {
 				app.appendLog("Steam scan did not find Graveyard Keeper.")
+				app.setBusy(false, "Graveyard Keeper was not found. Use Add game… to select its folder.")
 			} else {
-				app.appendLog("Steam scan found Graveyard Keeper.")
+				app.appendLog("Steam scan found Graveyard Keeper. Select Install / update KeeperLoader to continue.")
+				app.setBusy(false, "Graveyard Keeper found. Install or update KeeperLoader when ready.")
 			}
 		})
 	}()

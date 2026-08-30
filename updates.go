@@ -75,18 +75,29 @@ func extractZipFile(entry *zip.File, destination string, limit int64) error {
 	return nil
 }
 
-func checksumForManager(data string) (string, error) {
+func managerPackageChecksums(data string) (map[string]string, error) {
+	result := map[string]string{}
 	for _, line := range strings.Split(strings.ReplaceAll(data, "\r", ""), "\n") {
 		fields := strings.Fields(line)
-		if len(fields) < 2 {
+		if len(fields) < 2 || !sha256Pattern.MatchString(fields[0]) {
 			continue
 		}
 		name := strings.TrimPrefix(fields[len(fields)-1], "*")
-		if strings.EqualFold(filepath.Base(name), managerExecutableName) && sha256Pattern.MatchString(fields[0]) {
-			return strings.ToLower(fields[0]), nil
+		clean, err := normalizedArchivePath(strings.ReplaceAll(name, `\`, "/"))
+		if err != nil {
+			return nil, fmt.Errorf("manager checksum path rejected: %w", err)
+		}
+		result[strings.ToLower(clean)] = strings.ToLower(fields[0])
+	}
+	if _, ok := result[strings.ToLower(managerExecutableName)]; !ok {
+		return nil, errors.New("manager update package has no valid executable checksum")
+	}
+	for _, name := range requiredRuntimePayloadFiles {
+		if _, ok := result[strings.ToLower(runtimePayloadDirectory+"/"+name)]; !ok {
+			return nil, fmt.Errorf("manager update package has no checksum for runtime/%s", name)
 		}
 	}
-	return "", errors.New("manager update package has no valid executable checksum")
+	return result, nil
 }
 
 func stageManagerUpdate(packagePath string) (string, error) {
@@ -95,11 +106,12 @@ func stageManagerUpdate(packagePath string) (string, error) {
 		return "", fmt.Errorf("select the KeeperLoader Windows artifact ZIP: %w", err)
 	}
 	defer archive.Close()
-	if len(archive.File) > 64 {
+	if len(archive.File) > 256 {
 		return "", errors.New("manager update package contains too many files")
 	}
 	var executableEntry, versionEntry, checksumEntry *zip.File
 	seen := map[string]bool{}
+	entries := map[string]*zip.File{}
 	var expanded uint64
 	for _, entry := range archive.File {
 		name, pathErr := normalizedArchivePath(entry.Name)
@@ -112,12 +124,16 @@ func stageManagerUpdate(packagePath string) (string, error) {
 		}
 		seen[key] = true
 		expanded += entry.UncompressedSize64
-		if expanded > 96*1024*1024 {
-			return "", errors.New("manager update package exceeds the 96 MB expanded-size limit")
+		if expanded > 192*1024*1024 {
+			return "", errors.New("manager update package exceeds the 192 MB expanded-size limit")
 		}
-		if strings.Contains(name, "/") || entry.FileInfo().IsDir() {
+		if entry.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("manager update package contains symbolic link %q", name)
+		}
+		if entry.FileInfo().IsDir() {
 			continue
 		}
+		entries[key] = entry
 		switch {
 		case strings.EqualFold(name, managerExecutableName):
 			executableEntry = entry
@@ -140,16 +156,39 @@ func stageManagerUpdate(packagePath string) (string, error) {
 		return "", errors.New("manager update package VERSION is invalid")
 	}
 	parsedCurrent, _ := parseVersion(loaderVersion)
-	if compareVersion(parsedNew, parsedCurrent) <= 0 {
+	comparison := compareVersion(parsedNew, parsedCurrent)
+	if comparison < 0 {
 		return "", fmt.Errorf("manager update package is version %s; a version newer than %s is required", newVersion, loaderVersion)
+	}
+	if comparison == 0 {
+		currentPayload, payloadErr := runtimePayloadRoot()
+		if payloadErr == nil {
+			payloadErr = validateRuntimePayload(currentPayload)
+		}
+		if payloadErr == nil {
+			return "", fmt.Errorf("KeeperLoader Manager %s and its runtime payload are already installed", loaderVersion)
+		}
 	}
 	checksumText, err := readZipText(checksumEntry, 64*1024)
 	if err != nil {
 		return "", err
 	}
-	expectedDigest, err := checksumForManager(checksumText)
+	expectedDigests, err := managerPackageChecksums(checksumText)
 	if err != nil {
 		return "", err
+	}
+	for key := range entries {
+		if strings.EqualFold(key, managerChecksumsName) {
+			continue
+		}
+		if _, ok := expectedDigests[key]; !ok {
+			return "", fmt.Errorf("manager update package contains undeclared file %q", entries[key].Name)
+		}
+	}
+	for key := range expectedDigests {
+		if _, ok := entries[key]; !ok {
+			return "", fmt.Errorf("manager update package checksum references missing file %q", key)
+		}
 	}
 	root := os.Getenv("LOCALAPPDATA")
 	if root == "" {
@@ -159,15 +198,23 @@ func stageManagerUpdate(packagePath string) (string, error) {
 	if err = os.MkdirAll(updateDirectory, 0755); err != nil {
 		return "", err
 	}
-	stagedExecutable := filepath.Join(updateDirectory, managerExecutableName)
-	if err = extractZipFile(executableEntry, stagedExecutable, 64*1024*1024); err != nil {
-		_ = os.RemoveAll(updateDirectory)
-		return "", err
+	for key, digest := range expectedDigests {
+		entry := entries[key]
+		destination := filepath.Join(updateDirectory, filepath.FromSlash(key))
+		if err = extractZipFile(entry, destination, 64*1024*1024); err != nil {
+			_ = os.RemoveAll(updateDirectory)
+			return "", err
+		}
+		actual, hashErr := fileSHA256(destination)
+		if hashErr != nil || !strings.EqualFold(actual, digest) {
+			_ = os.RemoveAll(updateDirectory)
+			return "", fmt.Errorf("manager update file failed its SHA-256 integrity check: %s", key)
+		}
 	}
-	digest, err := fileSHA256(stagedExecutable)
-	if err != nil || !strings.EqualFold(digest, expectedDigest) {
+	stagedExecutable := filepath.Join(updateDirectory, managerExecutableName)
+	if err = validateRuntimePayload(filepath.Join(updateDirectory, runtimePayloadDirectory)); err != nil {
 		_ = os.RemoveAll(updateDirectory)
-		return "", errors.New("manager update executable failed its SHA-256 integrity check")
+		return "", fmt.Errorf("manager update runtime rejected: %w", err)
 	}
 	currentExecutable, err := os.Executable()
 	if err != nil {
@@ -215,17 +262,48 @@ func applyManagerUpdate(target string, previousPID uint32, updateDirectory strin
 	}
 	newTarget := target + ".new"
 	previousTarget := target + ".previous"
+	targetRuntime := filepath.Join(filepath.Dir(target), runtimePayloadDirectory)
+	newRuntime := targetRuntime + ".new"
+	previousRuntime := targetRuntime + ".previous"
 	_ = os.Remove(newTarget)
 	_ = os.Remove(previousTarget)
+	_ = os.RemoveAll(newRuntime)
+	_ = os.RemoveAll(previousRuntime)
+	if err = copyDirectory(filepath.Join(updateDirectory, runtimePayloadDirectory), newRuntime); err != nil {
+		return err
+	}
 	if err = copyFile(self, newTarget); err != nil {
+		_ = os.RemoveAll(newRuntime)
+		return err
+	}
+	if dirExists(targetRuntime) {
+		if err = os.Rename(targetRuntime, previousRuntime); err != nil {
+			_ = os.Remove(newTarget)
+			_ = os.RemoveAll(newRuntime)
+			return err
+		}
+	}
+	if err = os.Rename(newRuntime, targetRuntime); err != nil {
+		if dirExists(previousRuntime) {
+			_ = os.Rename(previousRuntime, targetRuntime)
+		}
+		_ = os.Remove(newTarget)
 		return err
 	}
 	if err = os.Rename(target, previousTarget); err != nil {
+		_ = os.RemoveAll(targetRuntime)
+		if dirExists(previousRuntime) {
+			_ = os.Rename(previousRuntime, targetRuntime)
+		}
 		_ = os.Remove(newTarget)
 		return err
 	}
 	if err = os.Rename(newTarget, target); err != nil {
 		_ = os.Rename(previousTarget, target)
+		_ = os.RemoveAll(targetRuntime)
+		if dirExists(previousRuntime) {
+			_ = os.Rename(previousRuntime, targetRuntime)
+		}
 		_ = os.Remove(newTarget)
 		return err
 	}
@@ -235,6 +313,10 @@ func applyManagerUpdate(target string, previousPID uint32, updateDirectory strin
 	if err = command.Start(); err != nil {
 		_ = os.Remove(target)
 		_ = os.Rename(previousTarget, target)
+		_ = os.RemoveAll(targetRuntime)
+		if dirExists(previousRuntime) {
+			_ = os.Rename(previousRuntime, targetRuntime)
+		}
 		return err
 	}
 	return nil
@@ -267,6 +349,7 @@ func handleManagerUpdateMode() bool {
 					_ = waitForPID(uint32(helperPID), 30*time.Second)
 					if current, executableErr := os.Executable(); executableErr == nil {
 						_ = os.Remove(current + ".previous")
+						_ = os.RemoveAll(filepath.Join(filepath.Dir(current), runtimePayloadDirectory) + ".previous")
 					}
 					_ = os.RemoveAll(updateDirectory)
 				}()

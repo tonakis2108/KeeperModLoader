@@ -11,14 +11,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
 	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
-const loaderVersion = "0.7.0"
+const loaderVersion = "0.7.1"
 
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
@@ -49,6 +48,30 @@ func copyFile(source, destination string) error {
 		return copyErr
 	}
 	return closeErr
+}
+
+func copyDirectory(source, destination string) error {
+	info, err := os.Stat(source)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("source directory is unavailable: %s", source)
+	}
+	return filepath.Walk(source, func(path string, entry os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symbolic links are not allowed in copied directories: %s", path)
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(destination, relative)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+		return copyFile(path, target)
+	})
 }
 
 func writeAtomic(path string, data []byte, mode os.FileMode) error {
@@ -129,39 +152,6 @@ func assertGameStopped(game *GameInfo) error {
 		return fmt.Errorf("close %s before changing KeeperLoader or its mods", game.ProcessName)
 	}
 	return nil
-}
-
-func runCompiler(compiler, output string, sources, references []string) error {
-	args := []string{"/nologo", "/target:library", "/optimize+", "/out:" + output}
-	for _, reference := range references {
-		args = append(args, "/reference:"+reference)
-	}
-	args = append(args, sources...)
-	compilerCommand := exec.Command(compiler, args...)
-	compilerCommand.Dir = filepath.Dir(output)
-	compilerCommand.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	combined, err := compilerCommand.CombinedOutput()
-	if err != nil {
-		message := strings.TrimSpace(string(combined))
-		if message == "" {
-			message = err.Error()
-		}
-		return fmt.Errorf("C# compilation failed: %s", message)
-	}
-	return nil
-}
-
-func findCSharpCompiler() (string, error) {
-	windowsDir := os.Getenv("WINDIR")
-	for _, path := range []string{
-		filepath.Join(windowsDir, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe"),
-		filepath.Join(windowsDir, "Microsoft.NET", "Framework", "v4.0.30319", "csc.exe"),
-	} {
-		if fileExists(path) {
-			return path, nil
-		}
-	}
-	return "", errors.New("Windows .NET Framework 4.x C# compiler was not found")
 }
 
 var versionPattern = regexp.MustCompile(`^\d+\.\d+(?:\.\d+)?(?:\.\d+)?$`)
