@@ -4,6 +4,8 @@ package main
 
 import (
  "encoding/json"
+ "errors"
+ "strings"
  "os"
  "path/filepath"
  "testing"
@@ -112,4 +114,101 @@ func TestRootDocumentationDoesNotAdmitRuntimeFiles(t *testing.T) {
   stage:=t.TempDir();files,err:=extractVerifiedArchive(archive,stage);if err!=nil{t.Fatal(err)}
   if _,_,err=prepareExternalPayload(stage,files);err==nil{t.Fatalf("unexpected root payload accepted: %s",name)}
  }
+}
+
+
+func compatibilityRepairFixture(t *testing.T) (*GameInfo,string) {
+ t.Helper()
+ game:=pluginTestGame(t)
+ source:=t.TempDir()
+ files:=map[string]string{
+  "core/BepInEx.dll":"trusted official core",
+  "core/BepInEx.Preloader.dll":"trusted official preloader",
+  "plugins/KeeperLoaderManaged/keeperloader.nativehost/KeeperLoader.NativeHost.dll":"new host build",
+  "licenses/BepInEx-MIT.txt":"retained licence",
+  "KEEPERLOADER-COMPATIBILITY-NOTICE.txt":"new notice",
+  "keeperloader.runtime-sha256":"trusted runtime hashes",
+ }
+ for rel,data:=range files{if err:=writeAtomic(filepath.Join(source,filepath.FromSlash(rel)),[]byte(data),0644);err!=nil{t.Fatal(err)}}
+ if err:=copyDirectory(source,bepRoot(game));err!=nil{t.Fatal(err)}
+ if err:=writeAtomic(filepath.Join(bepRoot(game),".keeperloader-owned"),[]byte("owned"),0644);err!=nil{t.Fatal(err)}
+ if err:=writeAtomic(filepath.Join(game.GameDirectory,"KeeperLoader","state",bepMarker),[]byte("enabled"),0644);err!=nil{t.Fatal(err)}
+ return game,source
+}
+
+func TestCompatibilityRepairPreservesPackagesAndSettings(t *testing.T) {
+ game,source:=compatibilityRepairFixture(t)
+ enabled:=writePluginTestRecord(t,game,"external.enabled",true,nil)
+ disabled:=writePluginTestRecord(t,game,"external.disabled",false,nil)
+ preserved:=[]string{
+  filepath.Join(enabled.Path,bepRecord),filepath.Join(disabled.Path,bepRecord),
+  filepath.Join(bepRoot(game),"config","external.enabled.cfg"),
+  filepath.Join(game.GameDirectory,"KeeperLoader","mods","native.example","Native.dll"),
+  filepath.Join(game.GameDirectory,"KeeperLoader","mods","native.example",modDisabledMarker),
+  filepath.Join(game.GameDirectory,"KeeperLoader","config","native.example","settings.json"),
+ }
+ before:=map[string]string{}
+ for _,path:=range preserved{
+  if !fileExists(path){if err:=writeAtomic(path,[]byte("user data stays byte-for-byte"),0644);err!=nil{t.Fatal(err)}}
+  hash,err:=fileSHA256(path);if err!=nil{t.Fatal(err)};before[path]=hash
+ }
+ notice:=filepath.Join(bepRoot(game),"KEEPERLOADER-COMPATIBILITY-NOTICE.txt")
+ host:=filepath.Join(bepManagedRoot(game),bepHostID,"KeeperLoader.NativeHost.dll")
+ if err:=os.Remove(notice);err!=nil{t.Fatal(err)}
+ if err:=os.WriteFile(host,[]byte("previous legitimate host build"),0644);err!=nil{t.Fatal(err)}
+ if err:=verifyCompatibilityTree(game,source);err==nil{t.Fatal("outdated runtime incorrectly verified")}
+ if err:=refreshOwnedCompatibility(game,source);err!=nil{t.Fatal(err)}
+ if err:=verifyCompatibilityTree(game,source);err!=nil{t.Fatal(err)}
+ // A later manager can change notices independently of the core runtime.
+ if err:=os.WriteFile(filepath.Join(source,"KEEPERLOADER-COMPATIBILITY-NOTICE.txt"),[]byte("updated documentation"),0644);err!=nil{t.Fatal(err)}
+ if err:=refreshOwnedCompatibility(game,source);err!=nil{t.Fatal(err)}
+ for path,wanted:=range before{actual,err:=fileSHA256(path);if err!=nil||wanted!=actual{t.Fatalf("user file changed: %s: %v",path,err)}}
+ if !compatibilityEnabled(game){t.Fatal("repair changed activation state")}
+}
+
+func TestCompatibilityRepairRollsBackOnRenameFailure(t *testing.T) {
+ game,source:=compatibilityRepairFixture(t)
+ core:=filepath.Join(bepRoot(game),"core","BepInEx.dll")
+ host:=filepath.Join(bepManagedRoot(game),bepHostID,"KeeperLoader.NativeHost.dll")
+ for _,path:=range []string{core,host}{if err:=os.WriteFile(path,[]byte("previous runtime"),0644);err!=nil{t.Fatal(err)}}
+ beforeCore,_:=fileSHA256(core);beforeHost,_:=fileSHA256(host)
+ calls:=0
+ rename:=func(from,to string)error{calls++;if calls==4{return errors.New("simulated locked host")};return os.Rename(from,to)}
+ err:=refreshOwnedCompatibilityWithRename(game,source,rename)
+ if err==nil||!strings.Contains(err.Error(),"previous runtime restored"){t.Fatalf("expected restored transaction, got %v",err)}
+ afterCore,e1:=fileSHA256(core);afterHost,e2:=fileSHA256(host)
+ if e1!=nil||e2!=nil||beforeCore!=afterCore||beforeHost!=afterHost{t.Fatal("rollback did not restore previous runtime")}
+ if !compatibilityEnabled(game){t.Fatal("successful rollback changed activation state")}
+}
+
+func TestCompatibilityRepairRejectsUnownedCode(t *testing.T) {
+ for _,rel:=range []string{"core/Injected.dll","plugins/Other.dll","plugins/KeeperLoaderManaged/unknown/Plugin.dll","plugins/KeeperLoaderManaged/keeperloader.nativehost/Extra.dll","patchers/Patch.txt"}{
+  t.Run(rel,func(t *testing.T){
+   game,source:=compatibilityRepairFixture(t)
+   notice:=filepath.Join(bepRoot(game),"KEEPERLOADER-COMPATIBILITY-NOTICE.txt")
+   if err:=os.WriteFile(notice,[]byte("old notice"),0644);err!=nil{t.Fatal(err)}
+   before,_:=fileSHA256(notice)
+   if err:=writeAtomic(filepath.Join(bepRoot(game),filepath.FromSlash(rel)),[]byte("unowned"),0644);err!=nil{t.Fatal(err)}
+   if err:=refreshOwnedCompatibility(game,source);err==nil{t.Fatal("unowned code adopted by repair")}
+   after,_:=fileSHA256(notice);if before!=after{t.Fatal("failed audit modified installed runtime")}
+  })
+ }
+ game,source:=compatibilityRepairFixture(t)
+ if err:=os.Remove(filepath.Join(bepRoot(game),".keeperloader-owned"));err!=nil{t.Fatal(err)}
+ if err:=refreshOwnedCompatibility(game,source);err==nil{t.Fatal("unowned runtime adopted")}
+}
+
+
+func TestCompatibilityRepairRetainsBackupWhenRollbackFails(t *testing.T) {
+ game,source:=compatibilityRepairFixture(t)
+ host:=filepath.Join(bepManagedRoot(game),bepHostID,"KeeperLoader.NativeHost.dll")
+ if err:=os.WriteFile(host,[]byte("old host to recover"),0644);err!=nil{t.Fatal(err)}
+ calls:=0
+ rename:=func(from,to string)error{calls++;if calls==4||calls==5{return errors.New("simulated locked host")};return os.Rename(from,to)}
+ err:=refreshOwnedCompatibilityWithRename(game,source,rename)
+ if err==nil||!strings.Contains(err.Error(),"backups retained"){t.Fatalf("rollback failure was hidden: %v",err)}
+ if compatibilityEnabled(game){t.Fatal("partially refreshed runtime left active")}
+ matches,e:=filepath.Glob(filepath.Join(game.GameDirectory,"KeeperLoader",".compatibility-refresh-*","old-1","KeeperLoader.NativeHost.dll"))
+ if e!=nil||len(matches)!=1{t.Fatalf("recoverable old host backup missing: %v %v",matches,e)}
+ data,e:=os.ReadFile(matches[0]);if e!=nil||string(data)!="old host to recover"{t.Fatal("old host backup bytes lost")}
 }

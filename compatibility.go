@@ -112,7 +112,7 @@ func enableCompatibility(game *GameInfo) (string, error) {
  if dirExists(bepRoot(game)) {
   if !compatibilityOwned(game) { return "", errors.New("an existing BepInEx installation was found; it will not be overwritten or adopted automatically") }
   // Do not run arbitrary plugins or patchers installed outside our ownership.
-  if err = verifyCompatibilityTree(game, source); err != nil { return "", err }
+  if err = refreshOwnedCompatibility(game, source); err != nil { return "", err }
  } else {
   staging, stageErr := os.MkdirTemp(game.GameDirectory, ".bepinex-install-")
   if stageErr != nil { return "", stageErr }
@@ -123,20 +123,81 @@ func enableCompatibility(game *GameInfo) (string, error) {
  }
  marker := filepath.Join(game.GameDirectory, "KeeperLoader", "state", bepMarker)
  if err = writeAtomic(marker, []byte("explicit_user_opt_in=true\n"), 0644); err != nil { return "", err }
- return "BepInEx 5 compatibility enabled. One existing Doorstop bootstrap dispatches both runtimes. Restart the game.", nil
+ return "BepInEx 5 compatibility enabled and its runtime refreshed. Installed native mods, external plugins and settings were preserved. Restart the game.", nil
+}
+
+// Only these KeeperLoader-owned components are replaced. User packages,
+// configuration, logs, disabled packages and native loader files are untouched.
+func compatibilityComponents() []string {
+ return []string{"core", filepath.Join("plugins", "KeeperLoaderManaged", bepHostID), "licenses", "KEEPERLOADER-COMPATIBILITY-NOTICE.txt", "keeperloader.runtime-sha256"}
+}
+
+func refreshOwnedCompatibility(game *GameInfo, source string) error {
+ return refreshOwnedCompatibilityWithRename(game, source, os.Rename)
+}
+
+func refreshOwnedCompatibilityWithRename(game *GameInfo, source string, rename func(string,string) error) error {
+ if !compatibilityOwned(game) { return errors.New("an existing BepInEx installation is not KeeperLoader-owned; it will not be changed") }
+ // Audit unowned code and package hashes before changing anything. A known
+ // runtime file may be old or missing: it will be replaced from the verified
+ // bundled payload, never trusted because of an installed checksum alone.
+ if err:=verifyCompatibilityLayout(game,source);err!=nil{return err}
+ parent:=filepath.Join(game.GameDirectory,"KeeperLoader")
+ if err:=os.MkdirAll(parent,0755);err!=nil{return err}
+ stage,err:=os.MkdirTemp(parent,".compatibility-refresh-");if err!=nil{return err}
+ retainBackup:=false
+ defer func(){if !retainBackup{_ = os.RemoveAll(stage)}}()
+ prepared:=filepath.Join(stage,"new")
+ if err=copyDirectory(source,prepared);err!=nil{return err}
+ type replacement struct{target,backup string;hadOld,installed bool}
+ journal:=[]replacement{}
+ rollback:=func(cause error) error{
+  var failures []error
+  for i:=len(journal)-1;i>=0;i--{
+   item:=journal[i]
+   if item.installed{if e:=os.RemoveAll(item.target);e!=nil{failures=append(failures,e);continue}}
+   if item.hadOld{if e:=rename(item.backup,item.target);e!=nil{failures=append(failures,e)}}
+  }
+  if len(failures)>0{
+   retainBackup=true
+   // Do not let a partially refreshed compatibility tree run next launch.
+   if e:=os.Remove(filepath.Join(game.GameDirectory,"KeeperLoader","state",bepMarker));e!=nil&&!os.IsNotExist(e){failures=append(failures,e)}
+   return fmt.Errorf("compatibility refresh failed: %w; rollback needs attention, backups retained at %s: %v",cause,stage,errors.Join(failures...))
+  }
+  return fmt.Errorf("compatibility refresh failed; previous runtime restored: %w",cause)
+ }
+ for i,rel:=range compatibilityComponents(){
+  incoming:=filepath.Join(prepared,rel)
+  if _,e:=os.Lstat(incoming);e!=nil{return rollback(e)}
+  item:=replacement{target:filepath.Join(bepRoot(game),rel),backup:filepath.Join(stage,fmt.Sprintf("old-%d",i))}
+  if _,e:=os.Lstat(item.target);e==nil{
+   if e=rename(item.target,item.backup);e!=nil{return rollback(e)}
+   item.hadOld=true
+  }else if !os.IsNotExist(e){return rollback(e)}
+  journal=append(journal,item)
+  if e:=os.MkdirAll(filepath.Dir(item.target),0755);e!=nil{return rollback(e)}
+  if e:=rename(incoming,item.target);e!=nil{return rollback(e)}
+  journal[len(journal)-1].installed=true
+ }
+ if err=verifyCompatibilityTree(game,source);err!=nil{return rollback(err)}
+ return nil
 }
 
 func verifyCompatibilityTree(game *GameInfo, source string) error {
- if entries, err := os.ReadDir(filepath.Join(bepRoot(game), "patchers")); err == nil && len(entries)>0 {
-  return errors.New("preloader patchers are not supported; compatibility was not enabled")
- }
- if err := filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
+ if err:=verifyCompatibilityLayout(game,source);err!=nil{return err}
+ return filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
   if err != nil { return err }; if info.IsDir() { return nil }
   rel, err := filepath.Rel(source,path); if err != nil { return err }
   wanted,e1 := fileSHA256(path); actual,e2 := fileSHA256(filepath.Join(bepRoot(game),rel))
-  if e1 != nil || e2 != nil || wanted != actual { return fmt.Errorf("missing or modified official compatibility file: %s",rel) }
+  if e1 != nil || e2 != nil || wanted != actual { return fmt.Errorf("missing or modified compatibility file: %s; use Enable / repair BepInEx 5",rel) }
   return nil
- }); err != nil { return err }
+ })
+}
+
+func verifyCompatibilityLayout(game *GameInfo, source string) error {
+ if entries, err := os.ReadDir(filepath.Join(bepRoot(game), "patchers")); err == nil && len(entries)>0 {
+  return errors.New("preloader patchers are not supported; compatibility was not enabled")
+ }else if err!=nil&&!os.IsNotExist(err){return err}
  mods,err := installedBepPlugins(game);if err != nil { return err }
  for _,mod := range mods { if !mod.Enabled { continue };record,err:=readPluginRecord(mod.Path);if err != nil { return err };if err=verifyPluginFiles(mod.Path,record);err!=nil{return err};if err=checkPluginConflicts(game,record,mod.ID);err!=nil{return err} }
  return filepath.Walk(bepRoot(game), func(path string, info os.FileInfo, err error) error {
@@ -144,6 +205,7 @@ func verifyCompatibilityTree(game *GameInfo, source string) error {
   if info.Mode()&os.ModeSymlink != 0 { return errors.New("symbolic links/reparse points are not supported") }
   rel, err := filepath.Rel(bepRoot(game), path)
   if err != nil || info.IsDir() { return err }
+  if !info.Mode().IsRegular(){return errors.New("non-regular compatibility files are not supported")}
   normalized := filepath.ToSlash(rel)
   if strings.EqualFold(filepath.Ext(rel), ".dll") {
    if strings.HasPrefix(normalized, "plugins/KeeperLoaderManaged/") {
@@ -154,9 +216,9 @@ func verifyCompatibilityTree(game *GameInfo, source string) error {
      return nil
     }
    }
-   expected := filepath.Join(source, rel)
-   wanted, e1 := fileSHA256(expected); actual, e2 := fileSHA256(path)
-   if e1 != nil || e2 != nil || wanted != actual { return fmt.Errorf("unexpected or modified compatibility DLL: %s", rel) }
+   // Content is verified after refresh. Unknown runtime/host DLLs are never
+   // adopted; only files actually present in the trusted source are eligible.
+   if !fileExists(filepath.Join(source,rel)){return fmt.Errorf("unexpected compatibility DLL: %s",rel)}
   }
   return nil
  })

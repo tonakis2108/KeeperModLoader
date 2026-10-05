@@ -333,8 +333,8 @@ func showModManager(owner walk.Form, game *GameInfo) {
 			ListBox{AssignTo: &list, Model: model, MinSize: Size{Height: 260}},
 			Label{Text: "Native and BepInEx packages are managed separately. External mods run trusted code in the game, not in a sandbox. Changes require the game to be closed."},
 			Composite{Layout: HBox{MarginsZero: true, Spacing: 7}, Children: []Widget{
-				PushButton{Text: "Enable BepInEx 5 compatibility…", OnClicked: func() {
-					if walk.MsgBox(dlg, "Optional compatibility runtime", "Enable the pinned official BepInEx 5.4.23.5 runtime?\r\n\r\nIts MIT licence and dependency licences are included under runtime/compatibility/NOTICE.txt. Existing BepInEx installations will not be overwritten. Native packages remain unchanged.\r\n\r\nPlugins can modify the game or crash it; they are not sandboxed. This feature requires in-game testing.", walk.MsgBoxYesNo|walk.MsgBoxIconWarning) != walk.DlgCmdYes { return }
+				PushButton{Text: "Enable / repair BepInEx 5…", OnClicked: func() {
+					if walk.MsgBox(dlg, "Optional compatibility runtime", "Enable the pinned official BepInEx 5.4.23.5 runtime?\r\n\r\nIts MIT licence and dependency licences are included under runtime/compatibility/NOTICE.txt. KeeperLoader-owned compatibility files will be refreshed. Other BepInEx installations will not be overwritten. Installed plugins and settings are preserved. Native packages remain unchanged.\r\n\r\nPlugins can modify the game or crash it; they are not sandboxed. This feature requires in-game testing.", walk.MsgBoxYesNo|walk.MsgBoxIconWarning) != walk.DlgCmdYes { return }
 					message, err := enableCompatibility(game)
 					if err != nil { walk.MsgBox(dlg, "Compatibility not enabled", err.Error(), walk.MsgBoxIconError); return }
 					refresh(); status.SetText(message)

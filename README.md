@@ -107,7 +107,7 @@ Using the optional manager:
 
 KeeperLoader validates archive paths, blocked executable/script types, the manifest, explicit `graveyard-keeper` support, minimum loader version, and SHA-256 for every declared payload file. Updates are staged and the previous mod version is retained for rollback. Mod configuration and state are stored outside the active package folder.
 
-The old experimental external-plugin loader remains removed. Its old packages stay inactive. New BepInEx 5 packages use a separate registry and official optional runtime; see [COMPATIBILITY.md](COMPATIBILITY.md) for setup, safeguards and limitations. Use **Enable BepInEx 5 compatibility** and **Install BepInEx ZIP** in Manage mods. Native mods still use **Install Mod ZIP**. **Restore native mode** turns compatibility off without deleting packages or settings.
+The old experimental external-plugin loader remains removed. Its old packages stay inactive. New BepInEx 5 packages use a separate registry and official optional runtime; see [COMPATIBILITY.md](COMPATIBILITY.md) for setup, safeguards and limitations. Use **Enable / repair BepInEx 5** and **Install BepInEx ZIP** in Manage mods. Native mods still use **Install Mod ZIP**. **Restore native mode** turns compatibility off without deleting packages or settings.
 
 ## Security and reproducibility
 

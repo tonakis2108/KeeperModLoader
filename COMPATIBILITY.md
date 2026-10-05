@@ -10,7 +10,7 @@ a stable release can be claimed.
 
 1. Extract the complete Manager ZIP. Close the game.
 2. Install/update KeeperLoader for the selected game.
-3. Open Manage mods > Enable BepInEx 5 compatibility.
+3. Open Manage mods > Enable / repair BepInEx 5.
 4. Read the notices and explicitly accept the optional runtime.
 5. Use Install BepInEx ZIP for a mod the publisher lists for Graveyard Keeper.
 6. Start the game. Check both KeeperLoader/logs/latest.log and BepInEx/LogOutput.log.
@@ -27,6 +27,12 @@ Restore native mode disables compatibility without deleting its files or
 configuration. Safe mode next launch bypasses BepInEx entirely and starts the
 native host with native mods paused. To update the game-local runtime, restore
 native mode, install/update KeeperLoader, then enable compatibility again.
+The same Enable / repair action refreshes only the owned official core, native
+host, licences and notices from the verified bundled payload. Documentation
+changes and rebuilt host DLLs no longer require uninstalling compatibility.
+Installed plugins, disabled status, configuration and native mods are preserved.
+Unknown runtime DLLs, unregistered plugins and patchers are still rejected.
+Refresh is staged and rolls back if replacing a component fails.
 To remove compatibility, uninstall managed external plugins first; the owned
 BepInEx directory is archived in the game folder, not permanently deleted.
 
