@@ -50,6 +50,10 @@ jobs:
         shell: pwsh
         run: ./scripts/test-legacy-converter.ps1
 
+      - name: Build optional pinned BepInEx compatibility and inspect plugin metadata
+        shell: pwsh
+        run: ./scripts/build-compatibility.ps1
+
       - name: Generate Windows resource
         run: go generate ./...
 

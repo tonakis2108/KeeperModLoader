@@ -30,11 +30,27 @@ namespace Doorstop
                 Directory.CreateDirectory(Path.Combine(_loaderDirectory, "config"));
                 _logPath = Path.Combine(_loaderDirectory, "logs", "latest.log");
                 RotateLog();
-                Log("KeeperLoader bootstrap 0.7.5 starting.");
+                Log("KeeperLoader bootstrap 0.8.0 starting.");
                 Log("Process path: " + processPath);
 
                 PrepareEnvironment();
                 Log("KeeperLoader environment initialized.");
+                if (File.Exists(Path.Combine(_loaderDirectory, "state", "bepinex5.enabled")) &&
+                    Environment.GetEnvironmentVariable("KEEPERLOADER_SAFE_MODE") != "1")
+                {
+                    StartCompatibility();
+                    return;
+                }
+                InitializeNative();
+            }
+            catch (Exception exception)
+            {
+                Log("FATAL bootstrap error: " + exception);
+            }
+        }
+
+        private static void InitializeNative()
+        {
                 BuildStartupAssemblySet();
                 Log("Startup assembly triggers initialized.");
                 BuildAssemblyIndex();
@@ -51,11 +67,28 @@ namespace Doorstop
                         break;
                     }
                 }
-            }
-            catch (Exception exception)
-            {
-                Log("FATAL bootstrap error: " + exception);
-            }
+        }
+
+        public static void StartNativeFromCompatibility()
+        {
+            // Called by our BepInEx adapter once Unity is available. Keep the
+            // native API, catalog, data paths and deferred frame-loop startup.
+            BuildAssemblyIndex();
+            AppDomain.CurrentDomain.AssemblyResolve += ResolveAssembly;
+            StartRuntime();
+        }
+
+        private static void StartCompatibility()
+        {
+            string preloader = Path.Combine(_gameDirectory, "BepInEx", "core", "BepInEx.Preloader.dll");
+            if (!File.Exists(preloader)) throw new FileNotFoundException("Restore native mode in the manager; BepInEx preloader is missing.", preloader);
+            // Official v5 derives BepInEx root from this variable. Our single
+            // Doorstop entrypoint dispatches BEFORE game assemblies are loaded.
+            Environment.SetEnvironmentVariable("DOORSTOP_INVOKE_DLL_PATH", preloader);
+            Log("Starting optional official BepInEx 5 runtime; native host will attach KeeperLoader.");
+            Assembly assembly = Assembly.LoadFrom(preloader);
+            assembly.GetType("Doorstop.Entrypoint", true).GetMethod("Start",
+                BindingFlags.Public | BindingFlags.Static).Invoke(null, null);
         }
 
         private static void PrepareEnvironment()

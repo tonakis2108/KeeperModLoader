@@ -54,6 +54,11 @@ func (m *InstalledMod) String() string {
 	kind := ""
 	if m.Mode == legacyExternalPluginMode {
 		kind = "  [Legacy external: Inactive]"
+	} else if m.Mode == bepMode {
+		kind = "  [BepInEx 5]"
+		if m.Status == "Compatibility inactive" { status = "Compatibility inactive" }
+	} else {
+		kind = "  [KeeperLoader]"
 	}
 	return fmt.Sprintf("[%s]%s  %s  |  %s  |  %s", status, kind, m.Name, m.Version, m.ID)
 }
@@ -84,7 +89,7 @@ func installedMods(game *GameInfo) ([]*InstalledMod, error) {
 	modsRoot := filepath.Join(game.GameDirectory, "KeeperLoader", "mods")
 	entries, err := os.ReadDir(modsRoot)
 	if os.IsNotExist(err) {
-		return nil, nil
+		return installedBepPlugins(game)
 	}
 	if err != nil {
 		return nil, err
@@ -119,6 +124,9 @@ func installedMods(game *GameInfo) ([]*InstalledMod, error) {
 		}
 		result = append(result, mod)
 	}
+	external, err := installedBepPlugins(game)
+	if err != nil { return nil, err }
+	result = append(result, external...)
 	sort.Slice(result, func(i, j int) bool { return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name) })
 	return result, nil
 }
@@ -134,6 +142,12 @@ func normalizedArchivePath(name string) (string, error) {
 	for _, part := range parts {
 		if part == ".." || part == "." || part == "" {
 			return "", fmt.Errorf("unsafe archive path %q", name)
+		}
+		base := strings.ToUpper(strings.SplitN(part, ".", 2)[0])
+		if strings.TrimRight(part, " .") != part || strings.ContainsAny(part, "<>\"|?*\x00") ||
+			base == "CON" || base == "PRN" || base == "AUX" || base == "NUL" ||
+			(len(base)==4 && (strings.HasPrefix(base,"COM") || strings.HasPrefix(base,"LPT")) && base[3]>='0' && base[3]<='9') {
+			return "", fmt.Errorf("unsafe Windows archive path %q", name)
 		}
 	}
 	return strings.Join(parts, "/"), nil
@@ -152,6 +166,7 @@ func extractVerifiedArchive(zipPath, destination string) (map[string]string, err
 	files := map[string]string{}
 	var expanded uint64
 	for _, entry := range archive.File {
+		if entry.Mode()&os.ModeSymlink != 0 { return nil, errors.New("mod package rejected: symbolic links are not allowed") }
 		name, pathErr := normalizedArchivePath(entry.Name)
 		if pathErr != nil {
 			return nil, fmt.Errorf("mod package rejected: %w", pathErr)
@@ -186,7 +201,8 @@ func extractVerifiedArchive(zipPath, destination string) (map[string]string, err
 			input.Close()
 			return nil, createErr
 		}
-		_, copyErr := io.Copy(out, io.LimitReader(input, int64(entry.UncompressedSize64)+1))
+		written, copyErr := io.Copy(out, io.LimitReader(input, int64(entry.UncompressedSize64)+1))
+		if copyErr == nil && uint64(written) != entry.UncompressedSize64 { copyErr = errors.New("archive size mismatch") }
 		input.Close()
 		closeErr := out.Close()
 		if copyErr != nil {
@@ -231,6 +247,7 @@ func updateModPackage(game *GameInfo, current *InstalledMod, zipPath string) (*I
 	if current == nil || !modIDPattern.MatchString(current.ID) {
 		return nil, "", errors.New("select a valid installed mod first")
 	}
+	if current.Mode == bepMode { return installBepPackage(game, zipPath, current, true) }
 	if strings.EqualFold(current.Mode, legacyExternalPluginMode) {
 		return nil, "", errors.New("external plugin support was removed; uninstall this inactive legacy package")
 	}
@@ -405,6 +422,20 @@ func installModPackageWithOptions(game *GameInfo, zipPath string, options modIns
 			return nil, "", fmt.Errorf("mod package rejected: undeclared file %q is present", key)
 		}
 	}
+	// Preserve legacy native manifests/API. For real PE DLLs, also prevent
+	// BepInEx entry points being smuggled through a native manifest.
+	for key, path := range archiveFiles {
+		if !strings.HasSuffix(key, ".dll") { continue }
+		file, openErr := os.Open(path)
+		if openErr != nil { return nil, "", openErr }
+		var magic [2]byte
+		_, _ = file.Read(magic[:]); file.Close()
+		if string(magic[:]) != "MZ" { continue }
+		inspection, inspectErr := inspectPackage(extractRoot)
+		if inspectErr != nil { return nil, "", inspectErr }
+		if len(inspection.Plugins) > 0 { return nil, "", errors.New("mixed package rejected: a KeeperLoader manifest cannot contain BepInEx entry points") }
+		break
+	}
 
 	loader := filepath.Join(game.GameDirectory, "KeeperLoader")
 	modsRoot := filepath.Join(loader, "mods")
@@ -480,6 +511,7 @@ func validateInstalledModPath(game *GameInfo, mod *InstalledMod) error {
 }
 
 func setModEnabled(game *GameInfo, mod *InstalledMod, enabled bool) (string, error) {
+	if mod != nil && mod.Mode == bepMode { return setBepEnabled(game, mod, enabled) }
 	if err := assertGameStopped(game); err != nil {
 		return "", err
 	}
@@ -506,6 +538,7 @@ func setModEnabled(game *GameInfo, mod *InstalledMod, enabled bool) (string, err
 }
 
 func uninstallMod(game *GameInfo, mod *InstalledMod) (string, error) {
+	if mod != nil && mod.Mode == bepMode { return uninstallBep(game, mod) }
 	if err := assertGameStopped(game); err != nil {
 		return "", err
 	}
@@ -546,6 +579,7 @@ func uninstallMod(game *GameInfo, mod *InstalledMod) (string, error) {
 }
 
 func restorePreviousMod(game *GameInfo, current *InstalledMod) (*InstalledMod, string, error) {
+	if current != nil && current.Mode == bepMode { return restoreBep(game, current) }
 	if err := assertGameStopped(game); err != nil {
 		return nil, "", err
 	}

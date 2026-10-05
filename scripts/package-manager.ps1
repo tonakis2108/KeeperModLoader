@@ -16,6 +16,7 @@ $files = @(
     "LICENSE",
     "THIRD_PARTY.md",
     "THIRD_PARTY_LICENSES.txt"
+    "COMPATIBILITY.md"
 )
 foreach ($name in $files) {
     Copy-Item (Join-Path $repository $name) (Join-Path $package $name) -Force
