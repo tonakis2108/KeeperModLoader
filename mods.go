@@ -436,21 +436,7 @@ func installModPackageWithOptions(game *GameInfo, zipPath string, options modIns
 		inspection, inspectErr := inspectPackage(extractRoot)
 		if inspectErr != nil { return nil, "", inspectErr }
 		if len(inspection.Plugins) > 0 { return nil, "", errors.New("mixed package rejected: a KeeperLoader manifest cannot contain BepInEx entry points") }
-		if compatibilityEnabled(game) {
-			for _, a := range inspection.Assemblies {
-				name := strings.ToLower(a.Name)
-				if name == "0harmony" || strings.HasPrefix(name,"monomod") || strings.HasPrefix(name,"mono.cecil") || strings.HasPrefix(name,"bepinex") {
-					return nil, "", fmt.Errorf("native package bundles shared runtime library %s; restore native mode before installing it",a.Name)
-				}
-			}
-			external, listErr := installedBepPlugins(game)
-			if listErr != nil { return nil, "", listErr }
-			for _, mod := range external {
-				if !mod.Enabled { continue }
-				record, readErr := readPluginRecord(mod.Path); if readErr != nil { return nil,"",readErr }
-				for _, a := range inspection.Assemblies { for _, b := range record.Assemblies { if strings.EqualFold(a.Name,b.Name) { return nil,"",fmt.Errorf("native assembly %s conflicts with external plugin %s",a.Name,mod.Name) } } }
-			}
-		}
+		if err := checkNativeCompatibility(game, inspection); err != nil { return nil, "", err }
 		break
 	}
 
@@ -540,6 +526,7 @@ func setModEnabled(game *GameInfo, mod *InstalledMod, enabled bool) (string, err
 	}
 	marker := filepath.Join(mod.Path, modDisabledMarker)
 	if enabled {
+		if err := checkInstalledNativeCompatibility(game, mod.Path); err != nil { return "", err }
 		if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
 			return "", err
 		}
@@ -647,6 +634,9 @@ func restorePreviousMod(game *GameInfo, current *InstalledMod) (*InstalledMod, s
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].modified.After(candidates[j].modified) })
 	previous := candidates[0]
+	if !keepDisabled {
+		if err := checkInstalledNativeCompatibility(game, previous.path); err != nil { return nil, "", err }
+	}
 	previousMarker := filepath.Join(previous.path, modDisabledMarker)
 	if keepDisabled {
 		if err = writeAtomic(previousMarker, []byte("disabled_by_manager=true\r\n"), 0644); err != nil {

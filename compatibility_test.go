@@ -75,3 +75,19 @@ func TestNativeAndExternalRegistryUnion(t *testing.T){
  mods,err:=installedMods(game);if err!=nil{t.Fatal(err)}
  if len(mods)!=1 || mods[0].Mode!=bepMode || mods[0].Enabled{t.Fatalf("incorrect unified registry: %#v",mods)}
 }
+
+func TestNativeSharedLibrariesOnlyRejectedInCompatibilityMode(t *testing.T){
+ game:=pluginTestGame(t)
+ report:=&packageInspection{Assemblies:[]pluginAssembly{{Name:"0Harmony"}}}
+ if err:=checkNativeCompatibility(game,report);err!=nil{t.Fatal("native-only mode changed:",err)}
+ if err:=writeAtomic(filepath.Join(game.GameDirectory,"KeeperLoader","state",bepMarker),[]byte("enabled"),0644);err!=nil{t.Fatal(err)}
+ if err:=checkNativeCompatibility(game,report);err==nil{t.Fatal("shared native runtime library accepted")}
+ external:=writePluginTestRecord(t,game,"external.example",true,nil)
+ record,err:=readPluginRecord(external.Path);if err!=nil{t.Fatal(err)}
+ record.Assemblies=[]pluginAssembly{{Name:"Private.Library"}}
+ data,_:=json.Marshal(record);if err=os.WriteFile(filepath.Join(external.Path,bepRecord),data,0644);err!=nil{t.Fatal(err)}
+ report.Assemblies=[]pluginAssembly{{Name:"private.library"}}
+ if err=checkNativeCompatibility(game,report);err==nil{t.Fatal("native/external assembly collision accepted")}
+ report.Assemblies=[]pluginAssembly{{Name:"Native.Unique"}}
+ if err=checkNativeCompatibility(game,report);err!=nil{t.Fatal(err)}
+}

@@ -54,6 +54,18 @@ $runtimeChecksums = Get-ChildItem (Join-Path $runtime "core"), $hostDirectory -R
 }
 $runtimeChecksums | Set-Content (Join-Path $runtime "keeperloader.runtime-sha256") -Encoding ASCII
 
+# Exercise the bootstrap's runtime gate with no plugin/runtime execution.
+$bootstrapTestGame = Join-Path $build "bootstrap-safety-game"
+New-Item -ItemType Directory -Force $bootstrapTestGame | Out-Null
+Copy-Item $runtime (Join-Path $bootstrapTestGame "BepInEx") -Recurse -Force
+"CI owned runtime" | Set-Content (Join-Path $bootstrapTestGame "BepInEx/.keeperloader-owned") -Encoding ASCII
+$bootstrapSmoke = Join-Path $build "BootstrapSafetySmoke.exe"
+$bootstrapDll = Join-Path $repository "runtime-package/KeeperLoader/core/KeeperLoader.Bootstrap.dll"
+& $csc /nologo /target:exe "/out:$bootstrapSmoke" (Join-Path $repository "src/Compatibility/BootstrapSafetySmoke.cs")
+if ($LASTEXITCODE -ne 0) { throw "Bootstrap verification test compilation failed" }
+& $bootstrapSmoke $bootstrapDll $bootstrapTestGame
+if ($LASTEXITCODE -ne 0) { throw "Bootstrap verification/safe-mode tests failed" }
+
 # Scan a compiled fixture without running its attribute constructors.
 $fixture = Join-Path $build "inspector-fixture"
 New-Item -ItemType Directory -Force $fixture | Out-Null

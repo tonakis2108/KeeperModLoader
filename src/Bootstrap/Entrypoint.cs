@@ -102,6 +102,7 @@ namespace Doorstop
             if (Directory.Exists(patchers) && Directory.GetFiles(patchers, "*", SearchOption.AllDirectories).Length != 0)
                 throw new InvalidOperationException("Preloader patchers are not supported.");
             string sums = Path.Combine(root, "keeperloader.runtime-sha256");
+            Dictionary<string, bool> officialFiles = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
             foreach (string line in File.ReadAllLines(sums))
             {
                 if (line.Length < 67) throw new InvalidDataException("Invalid compatibility checksums.");
@@ -109,6 +110,7 @@ namespace Doorstop
                 string path = Path.GetFullPath(Path.Combine(root, relative));
                 if (!path.StartsWith(Path.GetFullPath(root) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException("Unsafe compatibility checksum path.");
+                officialFiles[path] = true;
                 using (FileStream file = File.OpenRead(path))
                 using (SHA256 hash = SHA256.Create())
                 {
@@ -117,12 +119,33 @@ namespace Doorstop
                         throw new InvalidDataException("Compatibility file changed: " + relative);
                 }
             }
+            foreach (string required in new string[] { "core/BepInEx.dll", "core/BepInEx.Preloader.dll", "plugins/KeeperLoaderManaged/keeperloader.nativehost/KeeperLoader.NativeHost.dll" })
+            {
+                if (!officialFiles.ContainsKey(Path.GetFullPath(Path.Combine(root, required.Replace('/', Path.DirectorySeparatorChar)))))
+                    throw new InvalidDataException("Missing required compatibility checksum: " + required);
+            }
+            foreach (string file in Directory.GetFiles(Path.Combine(root, "core"), "*.dll", SearchOption.AllDirectories))
+            {
+                if (!officialFiles.ContainsKey(Path.GetFullPath(file)))
+                    throw new InvalidDataException("Unrecognized compatibility core DLL.");
+            }
             string plugins = Path.Combine(root, "plugins");
             string managed = Path.Combine(plugins, "KeeperLoaderManaged") + Path.DirectorySeparatorChar;
             foreach (string file in Directory.GetFiles(plugins, "*.dll", SearchOption.AllDirectories))
             {
                 if (!Path.GetFullPath(file).StartsWith(managed, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException("Unmanaged plugin detected; restore native mode before changing the runtime.");
+                string relative = Path.GetFullPath(file).Substring(managed.Length);
+                int separator = relative.IndexOf(Path.DirectorySeparatorChar);
+                if (separator <= 0) throw new InvalidDataException("Loose DLLs in the managed plugin root are not supported.");
+                string owner = relative.Substring(0, separator);
+                if (string.Equals(owner, "keeperloader.nativehost", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!officialFiles.ContainsKey(Path.GetFullPath(file)))
+                        throw new InvalidDataException("Unrecognized native host DLL.");
+                }
+                else if (!File.Exists(Path.Combine(managed, owner, "keeperloader.bepinex.json")))
+                    throw new InvalidDataException("Unregistered managed plugin DLL.");
             }
             foreach (string directory in Directory.GetDirectories(managed))
             {

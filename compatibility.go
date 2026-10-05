@@ -96,7 +96,7 @@ func (b *limitedInspectionOutput) Write(p []byte) (int, error) {
 func enableCompatibility(game *GameInfo) (string, error) {
  if err := assertGameStopped(game); err != nil { return "", err }
  if !game.Supported || game.GameID != graveyardKeeperGameID || game.Architecture != "x64" || game.Backend != "Mono" {
-  return "", errors.New("compatibility currently supports only tested Windows x64 Unity Mono Graveyard Keeper installations")
+  return "", errors.New("compatibility currently supports only Windows x64 Unity Mono Graveyard Keeper installations")
  }
  if !loaderEnabled(game) || installedLoaderVersion(game) != loaderVersion {
   return "", errors.New("install / update KeeperLoader for this game first")
@@ -146,7 +146,14 @@ func verifyCompatibilityTree(game *GameInfo, source string) error {
   if err != nil || info.IsDir() { return err }
   normalized := filepath.ToSlash(rel)
   if strings.EqualFold(filepath.Ext(rel), ".dll") {
-   if strings.HasPrefix(normalized, "plugins/KeeperLoaderManaged/") && !strings.HasPrefix(normalized, "plugins/KeeperLoaderManaged/"+bepHostID+"/") { return nil }
+   if strings.HasPrefix(normalized, "plugins/KeeperLoaderManaged/") {
+    parts := strings.Split(strings.TrimPrefix(normalized, "plugins/KeeperLoaderManaged/"), "/")
+    if len(parts) < 2 { return errors.New("loose DLLs in the managed plugin root are not supported") }
+    if !strings.EqualFold(parts[0], bepHostID) {
+     if !fileExists(filepath.Join(bepManagedRoot(game), parts[0], bepRecord)) { return errors.New("unregistered managed plugin DLL rejected") }
+     return nil
+    }
+   }
    expected := filepath.Join(source, rel)
    wanted, e1 := fileSHA256(expected); actual, e2 := fileSHA256(path)
    if e1 != nil || e2 != nil || wanted != actual { return fmt.Errorf("unexpected or modified compatibility DLL: %s", rel) }
@@ -283,6 +290,32 @@ func checkNativeLibraries(game *GameInfo, incoming []pluginAssembly, compatibili
   }
  }
  return nil
+}
+
+func checkNativeCompatibility(game *GameInfo, inspection *packageInspection) error {
+ if !compatibilityEnabled(game) { return nil }
+ if len(inspection.Plugins)>0 { return errors.New("a native package cannot contain BepInEx entry points") }
+ for _,a:=range inspection.Assemblies {
+  name:=strings.ToLower(a.Name)
+  if name=="0harmony" || strings.HasPrefix(name,"monomod") || strings.HasPrefix(name,"mono.cecil") || strings.HasPrefix(name,"bepinex") {
+   return fmt.Errorf("native package bundles shared runtime library %s; restore native mode before activating it",a.Name)
+  }
+ }
+ external,err:=installedBepPlugins(game);if err!=nil{return err}
+ for _,mod:=range external {
+  if !mod.Enabled {continue}
+  record,err:=readPluginRecord(mod.Path);if err!=nil{return err}
+  for _,a:=range inspection.Assemblies {for _,b:=range record.Assemblies {
+   if strings.EqualFold(a.Name,b.Name){return fmt.Errorf("native assembly %s conflicts with external plugin %s",a.Name,mod.Name)}
+  }}
+ }
+ return nil
+}
+
+func checkInstalledNativeCompatibility(game *GameInfo, path string) error {
+ if !compatibilityEnabled(game) {return nil}
+ inspection,err:=inspectPackage(path);if err!=nil{return err}
+ return checkNativeCompatibility(game,inspection)
 }
 
 func installBepPackage(game *GameInfo, zipPath string, current *InstalledMod, declaredGame bool) (*InstalledMod,string,error) {
