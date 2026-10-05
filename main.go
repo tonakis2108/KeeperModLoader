@@ -331,7 +331,26 @@ func showModManager(owner walk.Form, game *GameInfo) {
 		Children: []Widget{
 			Label{Text: fmt.Sprintf("%s  |  game id: %s  |  Unity %s %s", game.ExecutableName, game.GameID, game.Backend, game.Architecture)},
 			ListBox{AssignTo: &list, Model: model, MinSize: Size{Height: 260}},
-			Label{Text: "Disable is reversible and preserves mod data. Uninstall permanently deletes that mod's files and data."},
+			Label{Text: "Native and BepInEx packages are managed separately. External mods run trusted code in the game, not in a sandbox. Changes require the game to be closed."},
+			Composite{Layout: HBox{MarginsZero: true, Spacing: 7}, Children: []Widget{
+				PushButton{Text: "Enable / repair BepInEx 5…", OnClicked: func() {
+					if walk.MsgBox(dlg, "Optional compatibility runtime", "Enable the pinned official BepInEx 5.4.23.5 runtime?\r\n\r\nIts MIT licence and dependency licences are included under runtime/compatibility/NOTICE.txt. KeeperLoader-owned compatibility files will be refreshed. Other BepInEx installations will not be overwritten. Installed plugins and settings are preserved. Native packages remain unchanged.\r\n\r\nPlugins can modify the game or crash it; they are not sandboxed. This feature requires in-game testing.", walk.MsgBoxYesNo|walk.MsgBoxIconWarning) != walk.DlgCmdYes { return }
+					message, err := enableCompatibility(game)
+					if err != nil { walk.MsgBox(dlg, "Compatibility not enabled", err.Error(), walk.MsgBoxIconError); return }
+					refresh(); status.SetText(message)
+				}},
+				PushButton{Text: "Restore native mode", OnClicked: func() {
+					message, err := restoreNativeMode(game)
+					if err != nil { walk.MsgBox(dlg, "Native mode", err.Error(), walk.MsgBoxIconError); return }
+					refresh(); status.SetText(message)
+				}},
+				PushButton{Text: "Remove compatibility…", OnClicked: func() {
+					if walk.MsgBox(dlg, "Remove compatibility", "Return to native mode and archive the compatibility runtime? Uninstall external plugins first. Its configuration will be preserved in the game folder.", walk.MsgBoxYesNo|walk.MsgBoxIconWarning) != walk.DlgCmdYes { return }
+					message, err := removeCompatibility(game)
+					if err != nil { walk.MsgBox(dlg, "Compatibility not removed", err.Error(), walk.MsgBoxIconError); return }
+					refresh(); status.SetText(message)
+				}},
+			}},
 			Composite{Layout: HBox{MarginsZero: true, Spacing: 7}, Children: []Widget{
 				PushButton{AssignTo: &installButton, Text: "Install Mod ZIP…", OnClicked: func() {
 					fileDialog := &walk.FileDialog{Title: "Select a KeeperLoader mod package", Filter: "KeeperLoader mod package (*.zip)|*.zip"}
@@ -357,6 +376,17 @@ func showModManager(owner walk.Form, game *GameInfo) {
 						message += " Previous version backed up."
 					}
 					status.SetText(message)
+				}},
+				PushButton{Text: "Install BepInEx ZIP…", OnClicked: func() {
+					fileDialog := &walk.FileDialog{Title: "Select a BepInEx 5 plugin ZIP published for Graveyard Keeper", Filter: "Plugin ZIP (*.zip)|*.zip"}
+					accepted, err := fileDialog.ShowOpen(dlg)
+					if err != nil || !accepted { return }
+					if walk.MsgBox(dlg, "Confirm external game target", "Confirm the publisher lists this mod for Graveyard Keeper, not another game.\r\n\r\nA BepInEx DLL without a process filter cannot prove game compatibility. Only install code from a publisher you trust. Runtime/game files and patchers are rejected.", walk.MsgBoxYesNo|walk.MsgBoxIconWarning) != walk.DlgCmdYes { return }
+					dlg.SetEnabled(false)
+					mod, _, err := installBepPackage(game, fileDialog.FilePath, nil, true)
+					dlg.SetEnabled(true)
+					if err != nil { walk.MsgBox(dlg, "External package rejected", err.Error(), walk.MsgBoxIconError); return }
+					refresh(); status.SetText(mod.Name + " installed as BepInEx 5. Restart the game; check BepInEx/LogOutput.log for actual load errors.")
 				}},
 				PushButton{AssignTo: &toggleButton, Text: "Enable / disable selected", OnClicked: func() {
 					index := list.CurrentIndex()
@@ -429,7 +459,9 @@ func showModManager(owner walk.Form, game *GameInfo) {
 						return
 					}
 					mod := model.items[index]
-					if walk.MsgBox(dlg, "Confirm permanent uninstall", "Permanently uninstall "+mod.Name+"?\r\n\r\nThe installed mod, its configuration, state, and backups will be deleted. Game saves are not touched.\r\n\r\nThis cannot be undone.", walk.MsgBoxYesNo|walk.MsgBoxIconWarning) != walk.DlgCmdYes {
+					prompt := "Permanently uninstall "+mod.Name+"?\r\n\r\nThe installed mod, its configuration, state, and backups will be deleted. Game saves are not touched.\r\n\r\nThis cannot be undone."
+					if mod.Mode == bepMode { prompt = "Uninstall " + mod.Name + "? Its package will be archived outside the plugin scan directory; configuration and backups will be preserved." }
+					if walk.MsgBox(dlg, "Confirm uninstall", prompt, walk.MsgBoxYesNo|walk.MsgBoxIconWarning) != walk.DlgCmdYes {
 						return
 					}
 					message, err := uninstallMod(game, mod)

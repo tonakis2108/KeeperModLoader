@@ -159,7 +159,7 @@ namespace KeeperLoader.Runtime
             _log = new FileLogger(Path.Combine(_loaderDirectory, "logs", "latest.log"), "Core");
             _badgeVisibleUntil = Time.realtimeSinceStartup + 30f;
             _safeMode = string.Equals(Environment.GetEnvironmentVariable("KEEPERLOADER_SAFE_MODE"), "1");
-            _log.Info("KeeperLoader runtime 0.7.5 initialized for " +
+            _log.Info("KeeperLoader runtime 0.8.0 initialized for " +
                 Environment.GetEnvironmentVariable("KEEPERLOADER_GAME_ID") +
                 (_safeMode ? " in SAFE MODE." : "."));
             _catalog = new ModCatalog(_loaderDirectory, _log);

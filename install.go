@@ -140,6 +140,7 @@ func validateRuntimePayloadForVersion(root, expectedVersion string) error {
 		extension := strings.ToLower(filepath.Ext(clean))
 		switch extension {
 		case ".exe", ".msi", ".bat", ".cmd", ".ps1", ".vbs", ".js":
+			if clean == "compatibility/tools/KeeperLoader.PackageInspector.exe" { break }
 			return fmt.Errorf("runtime payload contains blocked file type %q", extension)
 		}
 		expected[clean] = strings.ToLower(fields[0])
@@ -171,6 +172,9 @@ func validateRuntimePayloadForVersion(root, expectedVersion string) error {
 }
 
 func enableLoader(game *GameInfo) (string, error) {
+	if compatibilityEnabled(game) {
+		return "", errors.New("restore native mode before updating the game-local runtime; external packages and configuration will be preserved")
+	}
 	if !game.Supported {
 		return "", errors.New(game.Reason)
 	}
@@ -268,6 +272,9 @@ func enableLoader(game *GameInfo) (string, error) {
 }
 
 func disableLoader(game *GameInfo) (string, error) {
+	if compatibilityOwned(game) {
+		return "", errors.New("remove BepInEx compatibility through Manage mods first; refusing to leave an orphaned runtime or delete external configuration")
+	}
 	if err := assertGameStopped(game); err != nil {
 		return "", err
 	}

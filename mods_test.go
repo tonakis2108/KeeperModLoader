@@ -13,6 +13,59 @@ import (
 	"testing"
 )
 
+func writeArchiveLayoutFixture(t *testing.T, names []string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "layout.zip")
+	output, err := os.Create(path)
+	if err != nil { t.Fatal(err) }
+	writer := zip.NewWriter(output)
+	for _, name := range names {
+		entry, err := writer.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Store})
+		if err != nil { t.Fatal(err) }
+		if strings.HasSuffix(strings.ToLower(name), ".dll") {
+			if _, err = entry.Write([]byte("fixture DLL bytes")); err != nil { t.Fatal(err) }
+		}
+	}
+	if err = writer.Close(); err != nil { t.Fatal(err) }
+	if err = output.Close(); err != nil { t.Fatal(err) }
+	return path
+}
+
+func TestExternalArchiveBackslashFolderEntries(t *testing.T) {
+	path := writeArchiveLayoutFixture(t, []string{`BepInEx\`, `BepInEx\plugins\`, `BepInEx\plugins\Author\`, `BepInEx\plugins\Author\Plugin.dll`})
+	archive, err := zip.OpenReader(path)
+	if err != nil { t.Fatal(err) }
+	if archive.File[0].FileInfo().IsDir() { t.Fatal("fixture must reproduce ZIP folder entries without directory attributes") }
+	archive.Close()
+	root := filepath.Join(t.TempDir(), ".external-stage-test")
+	if err = os.MkdirAll(root, 0755); err != nil { t.Fatal(err) }
+	files, err := extractVerifiedArchive(path, root)
+	if err != nil { t.Fatal(err) }
+	if len(files) != 1 || !fileExists(filepath.Join(root, "BepInEx", "plugins", "Author", "Plugin.dll")) {
+		t.Fatalf("backslash folders were not extracted as directories: %#v", files)
+	}
+}
+
+func TestArchiveDirectoryOrderAndCollisions(t *testing.T) {
+	for _, names := range [][]string{
+		{"BepInEx/plugins/Plugin.dll", "BepInEx/", "BepInEx/plugins/"},
+		{"BepInEx/plugins/Plugin.dll"},
+	} {
+		path := writeArchiveLayoutFixture(t, names)
+		if _, err := extractVerifiedArchive(path, t.TempDir()); err != nil { t.Fatal(err) }
+	}
+	for _, names := range [][]string{
+		{"BepInEx", "BepInEx/plugins/Plugin.dll"},
+		{"BepInEx/plugins/Plugin.dll", "bepinex"},
+	} {
+		root := t.TempDir()
+		path := writeArchiveLayoutFixture(t, names)
+		if _, err := extractVerifiedArchive(path, root); err == nil { t.Fatal("file/directory collision accepted") }
+		entries, err := os.ReadDir(root)
+		if err != nil || len(entries) != 0 { t.Fatal("archive wrote files before detecting collision") }
+	}
+}
+
 func writeTestModPackage(t *testing.T, path, id, version, gameID string) {
 	writeTestModPackageWithEntryMode(t, path, id, version, gameID, "")
 }
