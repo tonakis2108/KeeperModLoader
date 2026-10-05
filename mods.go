@@ -164,6 +164,14 @@ func extractVerifiedArchive(zipPath, destination string) (map[string]string, err
 	}
 	seen := map[string]bool{}
 	files := map[string]string{}
+	type archiveEntry struct {
+		entry *zip.File
+		name string
+		key string
+		directory bool
+	}
+	var entries []archiveEntry
+	pathTypes := map[string]bool{}
 	var expanded uint64
 	for _, entry := range archive.File {
 		if entry.Mode()&os.ModeSymlink != 0 { return nil, errors.New("mod package rejected: symbolic links are not allowed") }
@@ -181,9 +189,33 @@ func extractVerifiedArchive(zipPath, destination string) (map[string]string, err
 		if expanded > 256*1024*1024 {
 			return nil, errors.New("mod package rejected: expanded content exceeds 256 MB")
 		}
-		if entry.FileInfo().IsDir() {
+		// Some Windows ZIP writers use backslashes and omit DOS/Unix
+		// directory attributes. Go's ZIP FileInfo then reports the folder
+		// as a file. Recognize its original trailing separator explicitly.
+		directory := entry.FileInfo().IsDir() || strings.HasSuffix(entry.Name, "/") || strings.HasSuffix(entry.Name, `\`)
+		if directory && entry.UncompressedSize64 != 0 {
+			return nil, fmt.Errorf("mod package rejected: directory entry contains data %q", name)
+		}
+		entries = append(entries, archiveEntry{entry: entry, name: name, key: key, directory: directory})
+		pathTypes[key] = directory
+	}
+	// Reject file/folder collisions before writing any archive content.
+	for _, item := range entries {
+		parent := item.key
+		for {
+			separator := strings.LastIndex(parent, "/")
+			if separator < 0 { break }
+			parent = parent[:separator]
+			if directory, exists := pathTypes[parent]; exists && !directory {
+				return nil, fmt.Errorf("mod package rejected: file %q is also used as a directory", parent)
+			}
+		}
+	}
+	for _, item := range entries {
+		if item.directory {
 			continue
 		}
+		entry, name, key := item.entry, item.name, item.key
 		output := filepath.Join(destination, filepath.FromSlash(name))
 		absoluteDestination, _ := filepath.Abs(destination)
 		absoluteOutput, _ := filepath.Abs(output)
