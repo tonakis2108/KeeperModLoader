@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Security.Cryptography;
 
 namespace Doorstop
 {
@@ -80,6 +81,7 @@ namespace Doorstop
 
         private static void StartCompatibility()
         {
+            VerifyCompatibilityRuntime();
             string preloader = Path.Combine(_gameDirectory, "BepInEx", "core", "BepInEx.Preloader.dll");
             if (!File.Exists(preloader)) throw new FileNotFoundException("Restore native mode in the manager; BepInEx preloader is missing.", preloader);
             // Official v5 derives BepInEx root from this variable. Our single
@@ -89,6 +91,45 @@ namespace Doorstop
             Assembly assembly = Assembly.LoadFrom(preloader);
             assembly.GetType("Doorstop.Entrypoint", true).GetMethod("Start",
                 BindingFlags.Public | BindingFlags.Static).Invoke(null, null);
+        }
+
+        private static void VerifyCompatibilityRuntime()
+        {
+            string root = Path.Combine(_gameDirectory, "BepInEx");
+            if (!File.Exists(Path.Combine(root, ".keeperloader-owned")))
+                throw new InvalidOperationException("Unowned compatibility runtime; restore native mode.");
+            string patchers = Path.Combine(root, "patchers");
+            if (Directory.Exists(patchers) && Directory.GetFiles(patchers, "*", SearchOption.AllDirectories).Length != 0)
+                throw new InvalidOperationException("Preloader patchers are not supported.");
+            string sums = Path.Combine(root, "keeperloader.runtime-sha256");
+            foreach (string line in File.ReadAllLines(sums))
+            {
+                if (line.Length < 67) throw new InvalidDataException("Invalid compatibility checksums.");
+                string relative = line.Substring(66).Replace('/', Path.DirectorySeparatorChar);
+                string path = Path.GetFullPath(Path.Combine(root, relative));
+                if (!path.StartsWith(Path.GetFullPath(root) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("Unsafe compatibility checksum path.");
+                using (FileStream file = File.OpenRead(path))
+                using (SHA256 hash = SHA256.Create())
+                {
+                    string actual = BitConverter.ToString(hash.ComputeHash(file)).Replace("-", "").ToLowerInvariant();
+                    if (!string.Equals(actual, line.Substring(0, 64), StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidDataException("Compatibility file changed: " + relative);
+                }
+            }
+            string plugins = Path.Combine(root, "plugins");
+            string managed = Path.Combine(plugins, "KeeperLoaderManaged") + Path.DirectorySeparatorChar;
+            foreach (string file in Directory.GetFiles(plugins, "*.dll", SearchOption.AllDirectories))
+            {
+                if (!Path.GetFullPath(file).StartsWith(managed, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("Unmanaged plugin detected; restore native mode before changing the runtime.");
+            }
+            foreach (string directory in Directory.GetDirectories(managed))
+            {
+                if (Path.GetFileName(directory) == "keeperloader.nativehost") continue;
+                if (!File.Exists(Path.Combine(directory, "keeperloader.bepinex.json")))
+                    throw new InvalidDataException("External plugin is missing its managed installation record.");
+            }
         }
 
         private static void PrepareEnvironment()
@@ -106,7 +147,8 @@ namespace Doorstop
                 }
                 catch (Exception exception)
                 {
-                    Log("Could not consume the safe-mode request; continuing with mods enabled: " +
+                    Environment.SetEnvironmentVariable("KEEPERLOADER_SAFE_MODE", "1");
+                    Log("Could not consume the safe-mode request; staying in safe mode to avoid loading mods: " +
                         exception.Message);
                 }
             }

@@ -20,6 +20,12 @@ const bepHostID = "keeperloader.nativehost"
 const bepMarker = "bepinex5.enabled"
 const bepRecord = "keeperloader.bepinex.json"
 
+func validPluginID(id string) bool {
+ if !modIDPattern.MatchString(id) || strings.HasPrefix(id, ".") { return false }
+ _, err := normalizedArchivePath(id)
+ return err == nil && !strings.EqualFold(id,bepHostID)
+}
+
 type pluginDependency struct {
  ID string `json:"id"`
  MinimumVersion string `json:"minimumVersion"`
@@ -102,6 +108,7 @@ func enableCompatibility(game *GameInfo) (string, error) {
  if !fileExists(filepath.Join(source, "core", "BepInEx.Preloader.dll")) {
   return "", errors.New("optional compatibility payload is missing; extract the full manager ZIP")
  }
+ if err = checkNativeLibraries(game, nil, true); err != nil { return "", err }
  if dirExists(bepRoot(game)) {
   if !compatibilityOwned(game) { return "", errors.New("an existing BepInEx installation was found; it will not be overwritten or adopted automatically") }
   // Do not run arbitrary plugins or patchers installed outside our ownership.
@@ -123,6 +130,15 @@ func verifyCompatibilityTree(game *GameInfo, source string) error {
  if entries, err := os.ReadDir(filepath.Join(bepRoot(game), "patchers")); err == nil && len(entries)>0 {
   return errors.New("preloader patchers are not supported; compatibility was not enabled")
  }
+ if err := filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
+  if err != nil { return err }; if info.IsDir() { return nil }
+  rel, err := filepath.Rel(source,path); if err != nil { return err }
+  wanted,e1 := fileSHA256(path); actual,e2 := fileSHA256(filepath.Join(bepRoot(game),rel))
+  if e1 != nil || e2 != nil || wanted != actual { return fmt.Errorf("missing or modified official compatibility file: %s",rel) }
+  return nil
+ }); err != nil { return err }
+ mods,err := installedBepPlugins(game);if err != nil { return err }
+ for _,mod := range mods { if !mod.Enabled { continue };record,err:=readPluginRecord(mod.Path);if err != nil { return err };if err=verifyPluginFiles(mod.Path,record);err!=nil{return err};if err=checkPluginConflicts(game,record,mod.ID);err!=nil{return err} }
  return filepath.Walk(bepRoot(game), func(path string, info os.FileInfo, err error) error {
   if err != nil { return err }
   if info.Mode()&os.ModeSymlink != 0 { return errors.New("symbolic links/reparse points are not supported") }
@@ -161,7 +177,7 @@ func readPluginRecord(root string) (*pluginRecord, error) {
  data, err := os.ReadFile(filepath.Join(root, bepRecord))
  if err != nil { return nil, err }
  var record pluginRecord
- if json.Unmarshal(data, &record)!=nil || record.Type!=bepMode || !modIDPattern.MatchString(record.Plugin.ID) || record.Plugin.ID==bepHostID {
+ if json.Unmarshal(data, &record)!=nil || record.Type!=bepMode || !validPluginID(record.Plugin.ID) {
   return nil, errors.New("invalid external package record")
  }
  return &record, nil
@@ -187,7 +203,7 @@ func installedBepPlugins(game *GameInfo) ([]*InstalledMod, error) {
 }
 
 func validateBepSelection(game *GameInfo, mod *InstalledMod) error {
- if mod==nil || mod.Mode!=bepMode || !modIDPattern.MatchString(mod.ID) || mod.ID==bepHostID { return errors.New("invalid external plugin selection") }
+ if mod==nil || mod.Mode!=bepMode || !validPluginID(mod.ID) { return errors.New("invalid external plugin selection") }
  expected := filepath.Join(bepDisabledRoot(game), mod.ID)
  if mod.Enabled { expected = filepath.Join(bepManagedRoot(game), mod.ID) }
  if !strings.EqualFold(filepath.Clean(mod.Path), filepath.Clean(expected)) { return errors.New("external plugin path is outside its managed directory") }
@@ -199,7 +215,7 @@ func validateBepSelection(game *GameInfo, mod *InstalledMod) error {
 func validatePluginMetadata(game *GameInfo, inspection *packageInspection) (*pluginMetadata, error) {
  if inspection.Native || len(inspection.Plugins)!=1 { return nil, errors.New("package must contain exactly one BepInEx 5 plugin and no native KeeperLoader mods") }
  plugin := &inspection.Plugins[0]
- if !modIDPattern.MatchString(plugin.ID) || strings.EqualFold(plugin.ID,bepHostID) || strings.TrimSpace(plugin.Name)=="" { return nil, errors.New("invalid or reserved plugin identity") }
+ if !validPluginID(plugin.ID) || strings.TrimSpace(plugin.Name)=="" { return nil, errors.New("invalid or reserved plugin identity") }
  if _,err:=parseVersion(plugin.Version); err!=nil { return nil, errors.New("invalid numeric plugin version") }
  if len(plugin.Processes)>0 {
   match:=false
@@ -220,6 +236,7 @@ func reservedPluginAssembly(name string) bool {
 }
 
 func checkPluginConflicts(game *GameInfo, incoming *pluginRecord, exclude string) error {
+ if err := checkNativeLibraries(game, incoming.Assemblies, false); err != nil { return err }
  installed,err:=installedBepPlugins(game);if err!=nil{return err}
  available:=map[string]string{bepHostID:loaderVersion}
  graph:=map[string][]string{}
@@ -248,6 +265,23 @@ func checkPluginConflicts(game *GameInfo, incoming *pluginRecord, exclude string
  var visit func(string)bool
  visit=func(id string)bool {if visiting[id]{return false};if done[id]{return true};visiting[id]=true;for _,dep:=range graph[id]{if !visit(dep){return false}};visiting[id]=false;done[id]=true;return true}
  for id:=range graph {if !visit(id){return errors.New("hard dependency cycle rejected")}}
+ return nil
+}
+
+func checkNativeLibraries(game *GameInfo, incoming []pluginAssembly, compatibilityStart bool) error {
+ mods,err:=installedMods(game);if err!=nil{return err}
+ for _,mod:=range mods {
+  if !mod.Enabled || mod.Mode!= "native" {continue}
+  inspection,err:=inspectPackage(mod.Path);if err!=nil{return fmt.Errorf("cannot verify native mod %s before compatibility: %w",mod.Name,err)}
+  if len(inspection.Plugins)>0{return fmt.Errorf("native mod %s contains external plugin metadata",mod.Name)}
+  for _,a:=range inspection.Assemblies {
+   name:=strings.ToLower(a.Name)
+   if compatibilityStart && (name=="0harmony" || strings.HasPrefix(name,"monomod") || strings.HasPrefix(name,"mono.cecil") || strings.HasPrefix(name,"bepinex")) {
+    return fmt.Errorf("native mod %s bundles a shared runtime library %s; compatibility will not replace or shadow it",mod.Name,a.Name)
+   }
+   for _,b:=range incoming {if strings.EqualFold(a.Name,b.Name){return fmt.Errorf("external assembly %s conflicts with native mod %s",b.Name,mod.Name)}}
+  }
+ }
  return nil
 }
 

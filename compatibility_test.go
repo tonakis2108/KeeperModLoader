@@ -37,6 +37,7 @@ func TestBepMetadataClassification(t *testing.T) {
  for _,tc:=range cases{t.Run(tc.name,func(t *testing.T){_,err:=validatePluginMetadata(game,&tc.report);if (err!=nil)!=tc.reject{t.Fatalf("reject=%v, error=%v",tc.reject,err)}})}
  wrong:=good;wrong.Processes=[]string{"OtherGame.exe"};if _,err:=validatePluginMetadata(game,&packageInspection{Plugins:[]pluginMetadata{wrong}});err==nil{t.Fatal("wrong game process accepted")}
  reserved:=good;reserved.ID=bepHostID;if _,err:=validatePluginMetadata(game,&packageInspection{Plugins:[]pluginMetadata{reserved}});err==nil{t.Fatal("reserved host GUID accepted")}
+ for _,id:=range []string{".","..","CON","AUX",".hidden","keeperloader.nativehost"}{if validPluginID(id){t.Fatalf("unsafe plugin ID accepted: %s",id)}}
 }
 func TestExternalDirectoriesAndConfigurationStaySeparate(t *testing.T) {
  game:=pluginTestGame(t);mod:=writePluginTestRecord(t,game,"author.example",true,nil)

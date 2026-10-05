@@ -23,7 +23,8 @@ internal static class PackageInspector
             {
                 if (new FileInfo(path).Length > 32 * 1024 * 1024) throw new InvalidDataException("Assembly exceeds 32 MB.");
                 using (AssemblyDefinition assembly = AssemblyDefinition.ReadAssembly(path,
-                    new ReaderParameters { ReadingMode = ReadingMode.Deferred, ReadSymbols = false }))
+                    new ReaderParameters { ReadingMode = ReadingMode.Deferred, ReadSymbols = false,
+                        AssemblyResolver = new RuntimeMetadataResolver() }))
                 {
                     if (assembly.Modules.Count != 1) throw new InvalidDataException("Multi-module assemblies are not supported.");
                     if ((assembly.MainModule.Attributes & ModuleAttributes.ILOnly) == 0)
@@ -107,5 +108,27 @@ internal static class PackageInspector
             yield return type;
             foreach (TypeDefinition nested in AllTypes(type.NestedTypes)) yield return nested;
         }
+    }
+
+    private sealed class RuntimeMetadataResolver : IAssemblyResolver
+    {
+        private AssemblyDefinition _bep;
+        public AssemblyDefinition Resolve(AssemblyNameReference name) { return Resolve(name, new ReaderParameters()); }
+        public AssemblyDefinition Resolve(AssemblyNameReference name, ReaderParameters parameters)
+        {
+            // Cecil needs the enum definition to decode BepInDependency flags.
+            // Resolve only the pinned official API, never an arbitrary plugin.
+            if (name.Name != "BepInEx" || name.Version.Major != 5)
+                throw new AssemblyResolutionException(name);
+            if (_bep == null)
+            {
+                string tools = AppDomain.CurrentDomain.BaseDirectory;
+                string api = Path.GetFullPath(Path.Combine(tools, "..", "runtime", "BepInEx", "core", "BepInEx.dll"));
+                _bep = AssemblyDefinition.ReadAssembly(api, new ReaderParameters { ReadSymbols = false,
+                    AssemblyResolver = this });
+            }
+            return _bep;
+        }
+        public void Dispose() { if (_bep != null) _bep.Dispose(); }
     }
 }

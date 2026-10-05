@@ -46,6 +46,13 @@ Copy-Item $cecil $tools -Force
 Copy-Item (Join-Path $repository "compatibility-licenses") (Join-Path $compatibility "licenses") -Recurse -Force
 Copy-Item (Join-Path $repository "THIRD_PARTY_LICENSES.txt") (Join-Path $compatibility "licenses/UnityDoorstop-and-existing-notices.txt") -Force
 Copy-Item (Join-Path $repository "COMPATIBILITY.md") (Join-Path $compatibility "NOTICE.txt") -Force
+Copy-Item (Join-Path $compatibility "licenses") (Join-Path $runtime "licenses") -Recurse -Force
+Copy-Item (Join-Path $compatibility "NOTICE.txt") (Join-Path $runtime "KEEPERLOADER-COMPATIBILITY-NOTICE.txt") -Force
+$runtimeChecksums = Get-ChildItem (Join-Path $runtime "core"), $hostDirectory -Recurse -File | Sort-Object FullName | ForEach-Object {
+    $relative = $_.FullName.Substring($runtime.Length + 1).Replace('\', '/')
+    "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $relative"
+}
+$runtimeChecksums | Set-Content (Join-Path $runtime "keeperloader.runtime-sha256") -Encoding ASCII
 
 # Scan a compiled fixture without running its attribute constructors.
 $fixture = Join-Path $build "inspector-fixture"
@@ -60,6 +67,7 @@ public sealed class ExplosiveAttribute : Attribute {
 }
 [BepInPlugin("fixture.plugin", "Fixture", "1.0.0")]
 [BepInDependency("dependency.example", "1.2.0")]
+[BepInDependency("dependency.optional", BepInDependency.DependencyFlags.SoftDependency)]
 [BepInProcess("Graveyard Keeper.exe")]
 [Explosive]
 public sealed class FixturePlugin : BaseUnityPlugin {
