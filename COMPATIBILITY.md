@@ -39,7 +39,11 @@ BepInEx directory is archived in the game folder, not permanently deleted.
   game assemblies load. The official chainloader starts the Native Host adapter.
 - Each external ZIP must contain exactly one concrete BepInEx 5 plugin.
   Other DLLs must be managed private dependencies with unique assembly names.
-- ZIPs may contain loose plugin files or BepInEx/plugins/... only. Runtime/core,
+- ZIPs may contain loose plugin files or BepInEx/plugins/... with known root
+  README/licence/changelog text files. Root documentation is retained in a
+  manager-owned package documentation folder; plugin DLL/resource paths stay
+  unchanged. Windows backslash directory entries are recognised even when the
+  ZIP omits directory attributes. Runtime/core,
   config, patchers, game assemblies, shared Harmony/MonoMod assemblies, scripts,
   nested archives and mixed native/external packages are rejected.
 - Process filters, GUIDs, versions, hard dependencies, incompatibilities,

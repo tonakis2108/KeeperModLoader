@@ -91,3 +91,25 @@ func TestNativeSharedLibrariesOnlyRejectedInCompatibilityMode(t *testing.T){
  report.Assemblies=[]pluginAssembly{{Name:"Native.Unique"}}
  if err=checkNativeCompatibility(game,report);err!=nil{t.Fatal(err)}
 }
+
+func TestMoveFurnitureArchiveLayoutAndReadme(t *testing.T) {
+ // Matches the supplied MoveFurniture ZIP: Windows directory entry with
+ // no directory attributes, a nested plugin DLL, and root README.txt.
+ archive:=writeArchiveLayoutFixture(t,[]string{`BepInEx\plugins\`, `BepInEx\plugins\GK_MoveFurniture\GK_MoveFurniture.dll`, "README.txt"})
+ stage:=t.TempDir()
+ files,err:=extractVerifiedArchive(archive,stage);if err!=nil{t.Fatal(err)}
+ pluginPath:=files["bepinex/plugins/gk_movefurniture/gk_movefurniture.dll"]
+ before,err:=fileSHA256(pluginPath);if err!=nil{t.Fatal(err)}
+ payload,hashes,err:=prepareExternalPayload(stage,files);if err!=nil{t.Fatal(err)}
+ if payload!=filepath.Join(stage,"BepInEx","plugins") || len(hashes)!=2{t.Fatalf("incorrect plugin layout: %s, %#v",payload,hashes)}
+ if !fileExists(filepath.Join(payload,"GK_MoveFurniture","GK_MoveFurniture.dll")) || !fileExists(filepath.Join(payload,"keeperloader-package-docs","README.txt")){t.Fatal("plugin or publisher documentation lost")}
+ after,err:=fileSHA256(pluginPath);if err!=nil || before!=after{t.Fatal("plugin DLL bytes changed")}
+}
+
+func TestRootDocumentationDoesNotAdmitRuntimeFiles(t *testing.T) {
+ for _,name:=range []string{"winhttp.dll","doorstop_config.ini","install.cmd","BepInEx/core/BepInEx.dll","README.exe","docs/README.txt"} {
+  archive:=writeArchiveLayoutFixture(t,[]string{"BepInEx/plugins/Plugin.dll",name})
+  stage:=t.TempDir();files,err:=extractVerifiedArchive(archive,stage);if err!=nil{t.Fatal(err)}
+  if _,_,err=prepareExternalPayload(stage,files);err==nil{t.Fatalf("unexpected root payload accepted: %s",name)}
+ }
+}

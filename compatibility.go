@@ -318,6 +318,55 @@ func checkInstalledNativeCompatibility(game *GameInfo, path string) error {
  return checkNativeCompatibility(game,inspection)
 }
 
+func isExternalPackageDocument(name string) bool {
+ if strings.Contains(name,"/") {return false}
+ switch strings.ToLower(name) {
+ case "readme", "readme.txt", "readme.md", "license", "license.txt", "license.md", "licence", "licence.txt", "licence.md", "changelog.txt", "changelog.md", "credits.txt", "authors.txt":
+  return true
+ }
+ return false
+}
+
+func prepareExternalPayload(staging string, files map[string]string) (string, []ManifestFile, error) {
+ // Accept loose plugins or BepInEx/plugins layouts plus known top-level
+ // documentation. Preserve resource paths; never deploy bootstrap/core files.
+ prefix:=""
+ for key:=range files {if strings.HasPrefix(key,"bepinex/plugins/"){prefix="bepinex/plugins/"}}
+ payload:=staging
+ if prefix!="" {
+  for key,path:=range files {
+   if strings.HasPrefix(key,prefix) {
+    suffix:=key[len(prefix):];payload=path
+    for range strings.Split(suffix,"/"){payload=filepath.Dir(payload)}
+    break
+   }
+  }
+ }
+ var hashes []ManifestFile
+ for key,source:=range files {
+  path:=source
+  if prefix!="" && !strings.HasPrefix(key,prefix) {
+   if !isExternalPackageDocument(key) {return "",nil,fmt.Errorf("unsupported file outside BepInEx/plugins: %s",key)}
+   path=filepath.Join(payload,"keeperloader-package-docs",filepath.Base(source))
+   if _,err:=os.Lstat(path);err==nil{return "",nil,errors.New("package documentation conflicts with a plugin file")}else if !os.IsNotExist(err){return "",nil,err}
+   if err:=copyFile(source,path);err!=nil{return "",nil,err}
+  } else {
+   rel,err:=filepath.Rel(payload,path);if err!=nil{return "",nil,err}
+   for _,part:=range strings.Split(strings.ToLower(filepath.ToSlash(rel)),"/") {
+    if part=="keeperloader-package-docs" {return "",nil,errors.New("package uses the reserved manager documentation directory")}
+   }
+  }
+  rel,err:=filepath.Rel(payload,path);if err!=nil{return "",nil,err}
+  name:=filepath.ToSlash(rel);lower:=strings.ToLower(name)
+  for _,part:=range strings.Split(lower,"/"){if part=="core" || part=="patchers" || part=="config" || part=="keepermod.json" || part==bepRecord || part=="keeperloader.activation" || part==modDisabledMarker{return "",nil,fmt.Errorf("reserved package path: %s",name)}}
+  ext:=strings.ToLower(filepath.Ext(name));if blockedExtensions[ext] || ext==".zip" || ext==".ini" {return "",nil,fmt.Errorf("unsupported external payload: %s",name)}
+  digest,err:=fileSHA256(path);if err!=nil{return "",nil,err}
+  hashes=append(hashes,ManifestFile{Path:name,SHA256:digest})
+ }
+ sort.Slice(hashes,func(i,j int)bool{return hashes[i].Path<hashes[j].Path})
+ return payload,hashes,nil
+}
+
 func installBepPackage(game *GameInfo, zipPath string, current *InstalledMod, declaredGame bool) (*InstalledMod,string,error) {
  if err:=assertGameStopped(game);err!=nil{return nil,"",err}
  if !compatibilityEnabled(game) || !compatibilityOwned(game) {return nil,"",errors.New("enable BepInEx 5 compatibility first")}
@@ -325,23 +374,7 @@ func installBepPackage(game *GameInfo, zipPath string, current *InstalledMod, de
  if current!=nil {if err:=validateBepSelection(game,current);err!=nil{return nil,"",err}}
  staging,err:=os.MkdirTemp(filepath.Join(game.GameDirectory,"KeeperLoader"),".external-stage-");if err!=nil{return nil,"",err};defer os.RemoveAll(staging)
  files,err:=extractVerifiedArchive(zipPath,staging);if err!=nil{return nil,"",err}
- // Accept loose plugin ZIPs or BepInEx/plugins/<folder> ZIPs; preserve
- // relative resources. Never deploy root files, config or bootstrap content.
- prefix:=""
- for key:=range files {if strings.HasPrefix(key,"bepinex/plugins/"){prefix="bepinex/plugins/"}}
- payload:=staging
- if prefix!="" {
-  // Canonical paths are obtained from extracted files, not case assumptions.
-  for key,path:=range files {if strings.HasPrefix(key,prefix){suffix:=key[len(prefix):];payload=path;for range strings.Split(suffix,"/"){payload=filepath.Dir(payload)};break}}
- }
- var hashes []ManifestFile
- for key,path:=range files {
-  if prefix!="" && !strings.HasPrefix(key,prefix){return nil,"",fmt.Errorf("unsupported file outside BepInEx/plugins: %s",key)}
-  rel,_:=filepath.Rel(payload,path);name:=filepath.ToSlash(rel);lower:=strings.ToLower(name)
-  for _,part:=range strings.Split(lower,"/"){if part=="core" || part=="patchers" || part=="config" || part=="keepermod.json" || part==bepRecord || part=="keeperloader.activation" || part==modDisabledMarker{return nil,"",fmt.Errorf("reserved package path: %s",name)}}
-  ext:=strings.ToLower(filepath.Ext(name));if blockedExtensions[ext] || ext==".zip" || ext==".ini" {return nil,"",fmt.Errorf("unsupported external payload: %s",name)}
-  digest,err:=fileSHA256(path);if err!=nil{return nil,"",err};hashes=append(hashes,ManifestFile{Path:name,SHA256:digest})
- }
+ payload,hashes,err:=prepareExternalPayload(staging,files);if err!=nil{return nil,"",err}
  inspection,err:=inspectPackage(payload);if err!=nil{return nil,"",err}
  plugin,err:=validatePluginMetadata(game,inspection);if err!=nil{return nil,"",err}
  record:=&pluginRecord{Type:bepMode,GameID:game.GameID,Plugin:*plugin,Assemblies:inspection.Assemblies,Files:hashes}
